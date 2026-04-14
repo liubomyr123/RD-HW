@@ -11,6 +11,8 @@
 #define LOG_WARN(x)     std::cout << "⚠️  " << x << "\n"
 #define LOG_SUCCESS(x)  std::cout << "✅ " << x << "\n"
 
+#define GRAVITATIONAL_ACCELERATION 9.81f
+
 /**
  * Написати консольну C++ програму, яка розраховує точку скиду боєприпасу з дрона на задану наземну ціль. 
  * Програма враховує: 
@@ -81,6 +83,8 @@ std::unordered_map<std::string, AmmoInfo> ammo_types_info = {
 
 bool getAmmoInfoByType(const std::string ammo_name, AmmoInfo& outAmmo)
 {
+    LOG_PROCESS("Searching ammo info by type...");
+
     auto it = ammo_types_info.find(ammo_name);
     
     if (it == ammo_types_info.end()) {
@@ -144,6 +148,60 @@ bool getInputData(const std::string& file_name, InputData& inputData)
     return true;
 }
 
+bool getAmmoTimeOfFlight(float& result, const InputData& inputData, const AmmoInfo& outAmmo)
+{
+    LOG_PROCESS("Calculating time of fly...");
+
+    float d = outAmmo.d;
+    float m = outAmmo.m;
+    float l = outAmmo.l;
+    float v0 = inputData.attackSpeed;
+    float z0 = inputData.zd;
+
+    // a · t³ + b · t² + c = 0
+    // a = d·g·m − 2d²·l·V₀
+    // b = −3g·m² + 3d·l·m·V₀
+    // c = 6m²·Z₀
+    // V₀ — швидкість атаки дрона, Z₀ — висота дрона (zd), g = 9.81 м/с².
+    float a = (d * GRAVITATIONAL_ACCELERATION * m) - 2 * d * d * l * v0;
+    if (std::abs(a) < 1e-6f)
+    {
+        LOG_ERROR("Invalid a: we cannot divide by zero");
+        return false;
+    }
+    float b = (-1) * 3 * GRAVITATIONAL_ACCELERATION * m * m + 3 * d * l * m * v0;
+    float c = 6 * m * m * z0;
+
+    // p = − b² / (3a²)
+    // q = 2b³ / (27a³) + c / a
+    // φ = arccos( 3q / (2p) · √(−3/p) )
+    float p = (-1) * b * b / (3 * a * a);
+    if (p >= 0.0f)
+    {
+        LOG_ERROR("Invalid p: must be negative for Cardano trig solution");
+        return false;
+    }
+    float q = 2 * b * b * b / (27 * a * a * a) + c / a;
+
+    float arg = (3 * q) / (2 * p) * std::sqrt(-3 / p);
+    if (arg < -1.0f || arg > 1.0f)
+    {
+        LOG_ERROR("Invalid acos argument: out of range");
+        return false;
+    }
+    float f = std::acos(arg);
+
+    // t = 2√(−p/3) · cos( (φ + 4π) / 3 ) − b / (3a)
+    float t = 2 * std::sqrt((p * (-1)) / 3) * std::cos((f + 4 * M_PI) / 3) - b / (3 * a);
+    LOG_SUCCESS("Successfully found time of flight");
+
+    std::cout << "📄 Result:\n";
+    std::cout << "  - t: " << t << "\n";
+
+    result = t;
+    return true;
+}
+
 int main()
 {
     std::string file_name = "input.txt";
@@ -156,6 +214,12 @@ int main()
 
     AmmoInfo ammoInfo;
     if (!getAmmoInfoByType(inputData.ammo_name, ammoInfo)) 
+    {
+        return 1;
+    }
+
+    float ammoTimeOfFlight = 0.0f;
+    if (!getAmmoTimeOfFlight(ammoTimeOfFlight, inputData, ammoInfo)) 
     {
         return 1;
     }
