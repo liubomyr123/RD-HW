@@ -81,29 +81,6 @@ std::unordered_map<std::string, AmmoInfo> ammo_types_info = {
     {"GLIDING-RKG", {1.4f,  0.1f,  1.0f, false}},
 };
 
-bool getAmmoInfoByType(const std::string ammo_name, AmmoInfo& outAmmo)
-{
-    LOG_PROCESS("Searching ammo info by type...");
-
-    auto it = ammo_types_info.find(ammo_name);
-    
-    if (it == ammo_types_info.end()) {
-        LOG_WARN("Unknown ammo type: " << ammo_name);
-        return false;
-    }
-
-    LOG_SUCCESS("Successfully found ammo type.");
-    outAmmo = it->second;
-
-    std::cout << "📄 Result:\n";
-    std::cout << "  - m: " << outAmmo.m << "\n";
-    std::cout << "  - d: " << outAmmo.d << "\n";
-    std::cout << "  - l: " << outAmmo.l << "\n";
-    std::cout << "  - isFreeFall: " << (outAmmo.isFreeFall ? "true" : "false") << "\n";
-
-    return true;
-}
-
 bool getInputData(const std::string& file_name, InputData& inputData)
 {
     LOG_PROCESS("Reading " + file_name + "...");
@@ -130,20 +107,43 @@ bool getInputData(const std::string& file_name, InputData& inputData)
         LOG_SUCCESS("Successfully found all params.");
     }
 
-    std::cout << "📄 Result:\n";
-    std::cout << "  - xd: " << inputData.xd << "\n";
-    std::cout << "  - yd: " << inputData.yd << "\n";
-    std::cout << "  - zd: " << inputData.zd << "\n";
-    std::cout << "  - targetX: " << inputData.targetX << "\n";
-    std::cout << "  - targetY: " << inputData.targetY << "\n";
-    std::cout << "  - attackSpeed: " << inputData.attackSpeed << "\n";
-    std::cout << "  - accelerationPath: " << inputData.accelerationPath << "\n";
-    std::cout << "  - ammo_name: " << inputData.ammo_name << "\n";
+    LOG_INFO("📄 Result:");
+    LOG_INFO("  - xd: " << inputData.xd);
+    LOG_INFO("  - yd: " << inputData.yd);
+    LOG_INFO("  - zd: " << inputData.zd);
+    LOG_INFO("  - targetX: " << inputData.targetX);
+    LOG_INFO("  - targetY: " << inputData.targetY);
+    LOG_INFO("  - attackSpeed: " << inputData.attackSpeed);
+    LOG_INFO("  - accelerationPath: " << inputData.accelerationPath);
+    LOG_INFO("  - ammo_name: " << inputData.ammo_name);
 
     std::string extra;
     if (file >> extra) {
         LOG_WARN("Found extra data: " + extra + " (ignored)");
     }
+
+    return true;
+}
+
+bool getAmmoInfoByType(const std::string ammo_name, AmmoInfo& outAmmo)
+{
+    LOG_PROCESS("Searching ammo info for " << ammo_name << "...");
+
+    auto it = ammo_types_info.find(ammo_name);
+    
+    if (it == ammo_types_info.end()) {
+        LOG_WARN("Unknown ammo type: " << ammo_name);
+        return false;
+    }
+
+    LOG_SUCCESS("Successfully found ammo type.");
+    outAmmo = it->second;
+
+    LOG_INFO("📄 Result:");
+    LOG_INFO("  - m: " << outAmmo.m);
+    LOG_INFO("  - d: " << outAmmo.d);
+    LOG_INFO("  - l: " << outAmmo.l);
+    LOG_INFO("  - isFreeFall: " << (outAmmo.isFreeFall ? "true" : "false"));
 
     return true;
 }
@@ -195,10 +195,96 @@ bool getAmmoTimeOfFlight(float& result, const InputData& inputData, const AmmoIn
     float t = 2 * std::sqrt((p * (-1)) / 3) * std::cos((f + 4 * M_PI) / 3) - b / (3 * a);
     LOG_SUCCESS("Successfully found time of flight");
 
-    std::cout << "📄 Result:\n";
-    std::cout << "  - t: " << t << "\n";
+    LOG_INFO("📄 Result:");
+    LOG_INFO("  - t: " << t);
 
     result = t;
+    return true;
+}
+
+bool getHorizontalFlightRange(float& result, const InputData& inputData, const AmmoInfo& outAmmo, float& ammoTimeOfFlight)
+{
+    // h = V₀t 
+    //      − t²d·V₀/(2m)
+    //      + t³(6d·g·l·m − 6d²(l²-1)·V₀)/(36m²)
+    //      + t⁴(
+    //              −6d²g·l·(1+l²+l⁴)m
+    //              + 3d³l²(1+l²)V₀
+    //              + 6d³l⁴(1+l²)V₀
+    //          ) / (36(1+l²)²m³)
+    //      + t⁵(
+    //              3d³g·l³m
+    //              − 3d⁴l²(1+l²)V₀
+    //          ) / (36(1+l²)m⁴)
+
+    // V₀ — швидкість атаки дрона, Z₀ — висота дрона (zd), g = 9.81 м/с²
+    // t - час польоту снаряду (Time of Flight)
+
+    float t = ammoTimeOfFlight;
+    float d = outAmmo.d;
+    float m = outAmmo.m;
+    if (std::abs(m) < 1e-6f)
+    {
+        LOG_ERROR("Invalid m: we cannot divide by zero");
+        return false;
+    }
+    float l = outAmmo.l;
+    float v0 = inputData.attackSpeed;
+
+    float t2 = t * t;
+    float t3 = t2 * t;
+    float t4 = t2 * t2;
+    float t5 = t4 * t;
+
+    float d2 = d * d;
+    float d3 = d2 * d;
+    float d4 = d2 * d2;
+
+    float m2 = m * m;
+    float m3 = m2 * m;
+    float m4 = m2 * m2;
+
+    float l2 = l * l;
+    float l3 = l2 * l;
+    float l4 = l2 * l2;
+
+    // V₀t
+    float step0 = v0 * t;
+
+    // − t²d·V₀/(2m)
+    float step1 = ((-1) * t2 * d * v0) / (2 * m);
+
+    // + t³(6d·g·l·m − 6d²(l²-1)·V₀)/(36m²)
+    float step2 = t3 * ((6 * d * GRAVITATIONAL_ACCELERATION * l * m) - (6 * d2 * (l2 - 1) * v0)) / (36 * m2);
+
+    // −6d²g·l·(1+l²+l⁴)m
+    float step3_0 = (-1) * 6 * d2 * GRAVITATIONAL_ACCELERATION * l * (1 + l2 + l4) * m;
+    // + 3d³l²(1+l²)V₀
+    float step3_1 = 3 * d3 * l2 * (1 + l2) * v0;
+    // + 6d³l⁴(1+l²)V₀
+    float step3_2 = 6 * d3 * l4 * (1 + l2) * v0;
+    // 36(1+l²)²m³
+    float step3_3 = 36 * (1 + l2) * (1 + l2) * m3;
+
+    float step3 = t4 * (step3_0 + step3_1 + step3_2) / step3_3;
+
+    // 3d³g·l³m
+    float step4_0 = 3 * d3 * GRAVITATIONAL_ACCELERATION * l3 * m;
+    // − 3d⁴l²(1+l²)V₀
+    float step4_1 = (-1) * 3 * d4 * l2 * (1 + l2)* v0;
+    // 36(1+l²)m⁴
+    float step4_2 = 36 * (1 + l2) * m4;
+
+    float step4 = t5 * (step4_0 + step4_1) / step4_2;
+
+    float h = step0 + step1 + step2 + step3 + step4;
+
+    LOG_SUCCESS("Successfully calculated horizontal flight range");
+
+    LOG_INFO("📄 Result:");
+    LOG_INFO("  - h: " << h);
+
+    result = h;
     return true;
 }
 
@@ -220,6 +306,12 @@ int main()
 
     float ammoTimeOfFlight = 0.0f;
     if (!getAmmoTimeOfFlight(ammoTimeOfFlight, inputData, ammoInfo)) 
+    {
+        return 1;
+    }
+
+    float horizontalFlightRange = 0.0f;
+    if (!getHorizontalFlightRange(horizontalFlightRange, inputData, ammoInfo, ammoTimeOfFlight)) 
     {
         return 1;
     }
