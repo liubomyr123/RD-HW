@@ -52,6 +52,14 @@ struct InputData {
     std::string ammo_name;
 };
 
+struct OutputData {
+    float fireX;
+    float fireY;
+    float postManeuverX;
+    float postManeuverY;
+    bool isRecalculated;
+};
+
  /**
   *     | Назва       | m (кг) | d (drag) | l (lift) | Тип               |
   *     ------------------------------------------------------------------
@@ -202,8 +210,10 @@ bool getAmmoTimeOfFlight(float& result, const InputData& inputData, const AmmoIn
     return true;
 }
 
-bool getHorizontalFlightRange(float& result, const InputData& inputData, const AmmoInfo& outAmmo, float& ammoTimeOfFlight)
+bool getHorizontalFlightRange(float& result, const InputData& inputData, const AmmoInfo& outAmmo, const float& ammoTimeOfFlight)
 {
+    LOG_PROCESS("Calculating horizontal flight range...");
+
     // h = V₀t 
     //      − t²d·V₀/(2m)
     //      + t³(6d·g·l·m − 6d²(l²-1)·V₀)/(36m²)
@@ -288,17 +298,182 @@ bool getHorizontalFlightRange(float& result, const InputData& inputData, const A
     return true;
 }
 
+bool getDistanceToTarget(float& result, const InputData& inputData)
+{
+    LOG_PROCESS("Calculating horizontal distance from copter to target...");
+
+    // D = √( (targetX − xd)² + (targetY − yd)² )
+    // targetX, targetY - координати цілі
+    // xd, yd - координати дрона
+
+    float xDiff = inputData.targetX - inputData.xd;
+    float yDiff = inputData.targetY - inputData.yd;
+
+    float step0 = xDiff * xDiff;
+    float step1 = yDiff * yDiff;
+
+    float D = std::sqrt(step0 + step1);
+
+    LOG_SUCCESS("Successfully calculated distance from drone to target");
+
+    LOG_INFO("📄 Result:");
+    LOG_INFO("  - D: " << D);
+
+    result = D;
+    return true;
+}
+
+bool isManeuverRequired(const float& h, const float& accelerationPath, const float& D)
+{
+    bool result = (h + accelerationPath) > D;
+    if (result)
+    {
+        LOG_WARN("Maneuver required: drone is too close to the target.");
+    }
+    else
+    {
+        LOG_SUCCESS("No maneuver required: drone is at correct release distance.");
+    }
+    return result;
+}
+
+bool getNewDroneCoordinatesForManeuver(float& newX, float& newY, const InputData& inputData, const float& D, const float& h)
+{
+    LOG_PROCESS("Calculating new drone coordinates for maneuver...");    
+
+    // xd' = targetX − (targetX − xd) · (h + accelerationPath) / D
+    // yd' = targetY − (targetY − yd) · (h + accelerationPath) / D
+
+    if (std::abs(D) < 1e-6f)
+    {
+        LOG_ERROR("Invalid D: we cannot divide by zero");
+        return false;
+    }
+
+    float step0 = (h + inputData.accelerationPath) / D;
+
+    newX = inputData.targetX - (inputData.targetX - inputData.xd) * step0;
+    newY = inputData.targetY - (inputData.targetY - inputData.yd) * step0;
+
+    LOG_SUCCESS("Successfully calculated new drone coordinates for maneuver.");
+
+    LOG_INFO("📄 Result:");
+    LOG_INFO("  - xd': " << newX);
+    LOG_INFO("  - yd': " << newY);
+
+    return true;
+}
+
+bool getAmmoDropPoint(OutputData& outputData, const InputData& inputData, const AmmoInfo& outAmmo, const float& D, const float& h)
+{
+    LOG_PROCESS("Calculating ammo drop point...");    
+
+    // ratio = (D − h) / D
+    // fireX = xd + (targetX − xd) · ratio
+    // fireY = yd + (targetY − yd) · ratio
+
+    if (std::abs(D) < 1e-6f)
+    {
+        LOG_ERROR("Invalid D: we cannot divide by zero");
+        return false;
+    }
+
+    float newXd = inputData.xd;
+    float newYd = inputData.yd;
+    float newH = h;
+    float newD = D;
+    auto newInputData = inputData;
+    if (isManeuverRequired(h, inputData.accelerationPath, D))
+    {
+        if (!getNewDroneCoordinatesForManeuver(newXd, newYd, inputData, D, h)) 
+        {
+            return false;
+        }
+
+        outputData.postManeuverX = newXd;
+        outputData.postManeuverY = newYd;
+        outputData.isRecalculated = true;
+
+        newInputData.xd = newXd;
+        newInputData.yd = newYd;
+
+        if (!getDistanceToTarget(newD, newInputData)) 
+        {
+            return false;
+        }
+        if (std::abs(newD) < 1e-6f)
+        {
+            LOG_ERROR("Invalid D: we cannot divide by zero");
+            return false;
+        }
+
+        float ammoTimeOfFlight = 0.0f;
+        if (!getAmmoTimeOfFlight(ammoTimeOfFlight, newInputData, outAmmo)) 
+        {
+            return false;
+        }
+
+        if (!getHorizontalFlightRange(newH, newInputData, outAmmo, ammoTimeOfFlight)) 
+        {
+            return false;
+        }
+    }
+
+    float ratio = (newD - newH) / newD;
+
+    outputData.fireX = newInputData.xd + (newInputData.targetX - newInputData.xd) * ratio;
+    outputData.fireY = newInputData.yd + (newInputData.targetY - newInputData.yd) * ratio;
+
+    LOG_SUCCESS("Successfully calculated ammo drop point.");
+
+    LOG_INFO("📄 Result:");
+    LOG_INFO("  - fireX: " << outputData.fireX);
+    LOG_INFO("  - fireY: " << outputData.fireY);
+
+    return true;
+}
+
+bool writeOutputToFile(const std::string& file_name, const OutputData& outputData)
+{
+    LOG_PROCESS("Writing result to " << file_name << "...");
+
+    std::ofstream file(file_name);
+    if (!file)
+    {
+        LOG_ERROR("Error opening file");
+        return false;
+    }
+
+    if (outputData.isRecalculated)
+    {
+        file << outputData.postManeuverX << " " << outputData.postManeuverY << " ";
+    }
+    file << outputData.fireX << " " << outputData.fireY;
+
+    if (file.fail())
+    {
+        LOG_ERROR("Failed while writing to file");
+        return false;
+    }
+
+    file.close();
+
+    LOG_SUCCESS("Successfully wrote result to file");
+    return true;
+}
+
 int main()
 {
-    std::string file_name = "input.txt";
+    std::string input_file_name = "input.txt";
+    std::string output_file_name = "output.txt";
 
     InputData inputData{};
-    if (!getInputData(file_name, inputData))
+    if (!getInputData(input_file_name, inputData))
     {
         return 1;
     }
 
-    AmmoInfo ammoInfo;
+    AmmoInfo ammoInfo{};
     if (!getAmmoInfoByType(inputData.ammo_name, ammoInfo)) 
     {
         return 1;
@@ -312,6 +487,23 @@ int main()
 
     float horizontalFlightRange = 0.0f;
     if (!getHorizontalFlightRange(horizontalFlightRange, inputData, ammoInfo, ammoTimeOfFlight)) 
+    {
+        return 1;
+    }
+
+    float distanceToTarget = 0.0f;
+    if (!getDistanceToTarget(distanceToTarget, inputData)) 
+    {
+        return 1;
+    }
+
+    OutputData outputData{};
+    if (!getAmmoDropPoint(outputData, inputData, ammoInfo, distanceToTarget, horizontalFlightRange)) 
+    {
+        return 1;
+    }
+
+    if (!writeOutputToFile(output_file_name, outputData)) 
     {
         return 1;
     }
@@ -344,7 +536,8 @@ int main()
  *      (горизонтальна дальність польоту снаряда + відстань для розгону дрона) > відстані від дрона до цілі
  *              або
  *      (h + accelerationPath) > D
- * Якщо дрон заблизько - значить йому потрібно спочатку відійти/перелетіти на правильну дистанцію перед виконанням скиду.
+ * Якщо дрон заблизько - значить йому потрібно спочатку відійти/перелетіти на правильну дистанцію 
+ * перед виконанням скиду та перерахувати усе з нивими координатами
  * 
  * Step 5: Знайти точку скиду
  * Це останній крок. Ми знаходимо ті координати для дрона, в яких він має скинути снаряд.
