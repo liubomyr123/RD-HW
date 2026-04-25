@@ -16,6 +16,26 @@
 #define TARGET_TIME_STEPS 60
 #define SIM_MAX_STEPS 10000
 
+/**
+ *      | Значення  | Назва         | Опис                                          |
+ *      -----------------------------------------------------------------------------
+ *      | 0         | STOPPED       | Повна зупинка (v = 0))                        |
+ *      | 1         | ACCELERATING  | Розгін від 0 до attackSpeed                   |
+ *      | 2         | DECELERATING  | Гальмування від attackSpeed до 0              |
+ *      | 3         | TURNING       | Поворот на місці (v \= 0, зміна напрямку)     |
+ *      | 4         | MOVING        | Рух з крейсерською швидкістю attackSpeed      |
+ */
+
+enum DroneState
+{
+    STOPPED = 0,
+    ACCELERATING,
+    DECELERATING,
+    TURNING,
+    MOVING,
+};
+
+
 struct SimState {
     float totalSimTime = 0.0f;
 
@@ -25,6 +45,11 @@ struct SimState {
 
     float droneDir;
     float droneVelocity = 0.0f;
+
+    // float targetDir;
+
+    DroneState droneState = STOPPED;
+    size_t currentTargetIndex = 0;
 };
 
 /**
@@ -223,25 +248,6 @@ struct OutputData {
  *  
  */
 
-/**
- *      | Значення  | Назва         | Опис                                          |
- *      -----------------------------------------------------------------------------
- *      | 0         | STOPPED       | Повна зупинка (v = 0))                        |
- *      | 1         | ACCELERATING  | Розгін від 0 до attackSpeed                   |
- *      | 2         | DECELERATING  | Гальмування від attackSpeed до 0              |
- *      | 3         | TURNING       | Поворот на місці (v \= 0, зміна напрямку)     |
- *      | 4         | MOVING        | Рух з крейсерською швидкістю attackSpeed      |
- */
-
-enum DronState
-{
-    STOPPED = 0,
-    ACCELERATING,
-    DECELERATING,
-    TURNING,
-    MOVING,
-};
-
 struct Vec2 {
     float x;
     float y;
@@ -335,7 +341,7 @@ bool getInputData(const std::string& file_name, InputData& inputData)
 
     std::string extra;
     if (file >> extra) {
-        LOG_WARN("Found extra data: " + extra + " (ignored)");
+        // LOG_WARN("Found extra data: " + extra + " (ignored)");
     }
 
     return true;
@@ -343,7 +349,7 @@ bool getInputData(const std::string& file_name, InputData& inputData)
 
 bool getTargetsData(const std::string& file_name, TargetsData& targetsData)
 {
-    LOG_PROCESS("Reading " + file_name + "...");
+    // LOG_PROCESS("Reading " + file_name + "...");
 
     std::ifstream file(file_name);
     if (!file) {
@@ -384,14 +390,14 @@ bool getTargetsData(const std::string& file_name, TargetsData& targetsData)
         return false;
     }
 
-    LOG_SUCCESS("Successfully read all data for " << TARGET_COUNT << " targets.");
+    // LOG_SUCCESS("Successfully read all data for " << TARGET_COUNT << " targets.");
 
     return true;
 }
 
 bool getAmmoInfoByType(const std::string ammo_name, AmmoInfo& ammoInfo)
 {
-    LOG_PROCESS("Searching ammo info for " << ammo_name << "...");
+    // LOG_PROCESS("Searching ammo info for " << ammo_name << "...");
 
     auto it = ammo_types_info.find(ammo_name);
     
@@ -400,14 +406,15 @@ bool getAmmoInfoByType(const std::string ammo_name, AmmoInfo& ammoInfo)
         return false;
     }
 
-    LOG_SUCCESS("Successfully found ammo type.");
     ammoInfo = it->second;
 
-    LOG_INFO("📄 Result:");
-    LOG_INFO("  - m: " << ammoInfo.m);
-    LOG_INFO("  - d: " << ammoInfo.d);
-    LOG_INFO("  - l: " << ammoInfo.l);
-    LOG_INFO("  - isFreeFall: " << (ammoInfo.isFreeFall ? "true" : "false"));
+    // LOG_SUCCESS("Successfully found ammo type.");
+
+    // LOG_INFO("📄 Result:");
+    // LOG_INFO("  - m: " << ammoInfo.m);
+    // LOG_INFO("  - d: " << ammoInfo.d);
+    // LOG_INFO("  - l: " << ammoInfo.l);
+    // LOG_INFO("  - isFreeFall: " << (ammoInfo.isFreeFall ? "true" : "false"));
 
     return true;
 }
@@ -416,7 +423,7 @@ bool getAmmoTimeOfFlight(float& result,
     const InputData& inputData, 
     const AmmoInfo& ammoInfo)
 {
-    LOG_PROCESS("Calculating time of fly...");
+    // LOG_PROCESS("Calculating time of fly...");
 
     float d = ammoInfo.d;
     float m = ammoInfo.m;
@@ -459,10 +466,11 @@ bool getAmmoTimeOfFlight(float& result,
 
     // t = 2√(−p/3) · cos( (φ + 4π) / 3 ) − b / (3a)
     float t = 2 * std::sqrt((p * (-1)) / 3) * std::cos((f + 4 * M_PI) / 3) - b / (3 * a);
-    LOG_SUCCESS("Successfully found time of flight");
 
-    LOG_INFO("📄 Result:");
-    LOG_INFO("  - t: " << t);
+    // LOG_SUCCESS("Successfully found time of flight");
+
+    // LOG_INFO("📄 Result:");
+    // LOG_INFO("  - t: " << t);
 
     result = t;
     return true;
@@ -473,7 +481,7 @@ bool getHorizontalFlightRange(float& result,
     const AmmoInfo& ammoInfo, 
     const float& ammoTimeOfFlight)
 {
-    LOG_PROCESS("Calculating horizontal flight range...");
+    // LOG_PROCESS("Calculating horizontal flight range...");
 
     // h = V₀t 
     //      − t²d·V₀/(2m)
@@ -550,10 +558,10 @@ bool getHorizontalFlightRange(float& result,
 
     float h = step0 + step1 + step2 + step3 + step4;
 
-    LOG_SUCCESS("Successfully calculated horizontal flight range");
+    // LOG_SUCCESS("Successfully calculated horizontal flight range");
 
-    LOG_INFO("📄 Result:");
-    LOG_INFO("  - h: " << h << "[m]");
+    // LOG_INFO("📄 Result:");
+    // LOG_INFO("  - h: " << h << "[m]");
 
     result = h;
     return true;
@@ -565,7 +573,7 @@ bool getDistanceToTarget(float& result,
     const float& targetX, 
     const float& targetY)
 {
-    LOG_PROCESS("Calculating horizontal distance from copter to target...");
+    // LOG_PROCESS("Calculating horizontal distance from copter to target...");
 
     // D = √( (targetX − xd)² + (targetY − yd)² )
     // targetX, targetY - координати цілі
@@ -579,10 +587,10 @@ bool getDistanceToTarget(float& result,
 
     float D = std::sqrt(step0 + step1);
 
-    LOG_SUCCESS("Successfully calculated distance from drone to target");
+    // LOG_SUCCESS("Successfully calculated distance from drone to target");
 
-    LOG_INFO("📄 Result:");
-    LOG_INFO("  - D: " << D << "[m]");
+    // LOG_INFO("📄 Result:");
+    // LOG_INFO("  - D: " << D << "[m]");
 
     result = D;
     return true;
@@ -595,11 +603,11 @@ bool isManeuverRequired(const float& h,
     bool result = (h + accelerationPath) > D;
     if (result)
     {
-        LOG_WARN("Maneuver required: drone is too close to the target.");
+        // LOG_WARN("Maneuver required: drone is too close to the target.");
     }
     else
     {
-        LOG_SUCCESS("No maneuver required: drone is at correct release distance.");
+        // LOG_SUCCESS("No maneuver required: drone is at correct release distance.");
     }
     return result;
 }
@@ -612,7 +620,7 @@ bool getNewDroneCoordinatesForManeuver(float& newX,
     const float& targetX, 
     const float& targetY)
 {
-    LOG_PROCESS("Calculating new drone coordinates for maneuver...");    
+    // LOG_PROCESS("Calculating new drone coordinates for maneuver...");    
 
     // xd' = targetX − (targetX − xd) · (h + accelerationPath) / D
     // yd' = targetY − (targetY − yd) · (h + accelerationPath) / D
@@ -625,27 +633,29 @@ bool getNewDroneCoordinatesForManeuver(float& newX,
 
     float step0 = (h + inputData.accelerationPath) / D;
 
-    newX = targetX - (targetX - inputData.xd) * step0;
-    newY = targetY - (targetY - inputData.yd) * step0;
+    newX = targetX - (targetX - newX) * step0;
+    newY = targetY - (targetY - newY) * step0;
 
-    LOG_SUCCESS("Successfully calculated new drone coordinates for maneuver.");
+    // LOG_SUCCESS("Successfully calculated new drone coordinates for maneuver.");
 
-    LOG_INFO("📄 Result:");
-    LOG_INFO("  - xd': " << newX);
-    LOG_INFO("  - yd': " << newY);
+    // LOG_INFO("📄 Result:");
+    // LOG_INFO("  - xd': " << newX);
+    // LOG_INFO("  - yd': " << newY);
 
     return true;
 }
 
 bool getAmmoDropPoint(OutputData& outputData, 
     const InputData& inputData, 
+    const float& droneX,
+    const float& droneY,
     const AmmoInfo& ammoInfo, 
     const float& D, 
     const float& h, 
     const float& targetX, 
     const float& targetY)
 {
-    LOG_PROCESS("Calculating ammo drop point...");    
+    // LOG_PROCESS("Calculating ammo drop point...");    
 
     // ratio = (D − h) / D
     // fireX = xd + (targetX − xd) · ratio
@@ -657,8 +667,8 @@ bool getAmmoDropPoint(OutputData& outputData,
         return false;
     }
 
-    float newXd = inputData.xd;
-    float newYd = inputData.yd;
+    float newXd = droneX;
+    float newYd = droneY;
     float newH = h;
     float newD = D;
     auto newInputData = inputData;
@@ -703,11 +713,11 @@ bool getAmmoDropPoint(OutputData& outputData,
     outputData.fireX = newInputData.xd + (targetX - newInputData.xd) * ratio;
     outputData.fireY = newInputData.yd + (targetY - newInputData.yd) * ratio;
 
-    LOG_SUCCESS("Successfully calculated ammo drop point.");
+    // LOG_SUCCESS("Successfully calculated ammo drop point.");
 
-    LOG_INFO("📄 Result:");
-    LOG_INFO("  - fireX: " << outputData.fireX);
-    LOG_INFO("  - fireY: " << outputData.fireY);
+    // LOG_INFO("📄 Result:");
+    // LOG_INFO("  - fireX: " << outputData.fireX);
+    // LOG_INFO("  - fireY: " << outputData.fireY);
 
     return true;
 }
@@ -724,7 +734,7 @@ bool interpolate(InterpolationResult& result,
     const InputData& inputData, 
     const TargetsData& targetsData)
 {
-    LOG_PROCESS("Calculating new interpolated position...");
+    // LOG_PROCESS("Calculating new interpolated position...");
 
     /**
      * int idx = (int)floor(t / arrayTimeStep) % 60;
@@ -758,14 +768,14 @@ bool interpolate(InterpolationResult& result,
     float y = y0 + (y1 - y0) * frac;
     result.resultY = y;
 
-    LOG_SUCCESS("Successfully interpolated distance for target " << targetIndex);
+    // LOG_SUCCESS("Successfully interpolated distance for target " << targetIndex);
 
-    LOG_INFO("📄 Result:");
-    LOG_INFO("  - x0: " << x0 << " -> " << "x1: " << x1);
-    LOG_INFO("  - y0: " << y0 << " -> " << "y1: " << y1);
-    LOG_INFO("  - New x for target: " << x);
-    LOG_INFO("  - New y for target: " << y);
-    LOG_INFO("  - Time interval between target snapshots: " << frac * 100 << "%");
+    // LOG_INFO("📄 Result:");
+    // LOG_INFO("  - x0: " << x0 << " -> " << "x1: " << x1);
+    // LOG_INFO("  - y0: " << y0 << " -> " << "y1: " << y1);
+    // LOG_INFO("  - New x for target: " << x);
+    // LOG_INFO("  - New y for target: " << y);
+    // LOG_INFO("  - Time interval between target snapshots: " << frac * 100 << "%");
 
     return true;
 }
@@ -776,7 +786,7 @@ bool getTargetVelocity(Vec2& result,
     const InputData& inputData, 
     const TargetsData& targetsData)
 {
-    LOG_PROCESS("Calculating target velocity...");
+    // LOG_PROCESS("Calculating target velocity...");
 
     /**
      * float dx = targetX(t + dt) - targetX(t);
@@ -827,11 +837,11 @@ bool getTargetVelocity(Vec2& result,
     result.x = targetVx;
     result.y = targetVy;
 
-    LOG_SUCCESS("Successfully calculated velocity for target " << targetIndex);
+    // LOG_SUCCESS("Successfully calculated velocity for target " << targetIndex);
 
-    LOG_INFO("📄 Result:");
-    LOG_INFO("  - Velocity x: " << targetVx);
-    LOG_INFO("  - Velocity y: " << targetVy);
+    // LOG_INFO("📄 Result:");
+    // LOG_INFO("  - Velocity x: " << targetVx);
+    // LOG_INFO("  - Velocity y: " << targetVy);
 
     return true;
 }
@@ -841,7 +851,7 @@ bool getPredictedPosition(Vec2& result,
     const float& targetX, const float& targetY, 
     const float& totalTime)
 {
-    LOG_PROCESS("Calculating predicted position...");
+    // LOG_PROCESS("Calculating predicted position...");
 
     /**
      * float predictedX = targetX(t) + targetVx * totalTime;
@@ -855,11 +865,11 @@ bool getPredictedPosition(Vec2& result,
     float predictedX = targetX + targetVx * totalTime;
     float predictedY = targetY + targetVy * totalTime;
 
-    LOG_SUCCESS("Successfully calculated predicted position");
+    // LOG_SUCCESS("Successfully calculated predicted position");
 
-    LOG_INFO("📄 Result:");
-    LOG_INFO("  - Predicted x: " << predictedX);
-    LOG_INFO("  - Predicted y: " << predictedY);
+    // LOG_INFO("📄 Result:");
+    // LOG_INFO("  - Predicted x: " << predictedX);
+    // LOG_INFO("  - Predicted y: " << predictedY);
 
     return true;
 }
@@ -868,7 +878,7 @@ bool getTimeToTarget(float& result,
     const float& distanceToTarget, 
     const float& speed)
 {
-    LOG_PROCESS("Calculating drone travel time to target point...");
+    // LOG_PROCESS("Calculating drone travel time to target point...");
 
     if (std::abs(speed) < 1e-6f)
     {
@@ -878,12 +888,12 @@ bool getTimeToTarget(float& result,
 
     result = distanceToTarget / speed;
 
-    LOG_SUCCESS("Successfully calculated time for distance");
+    // LOG_SUCCESS("Successfully calculated time for distance");
 
-    LOG_INFO("📄 Result:");
-    LOG_INFO("  - Distance to point: " << distanceToTarget << "[m]");
-    LOG_INFO("  - Speed: " << speed << "[m/s]");
-    LOG_INFO("  - Time required: " << result << "[s]");
+    // LOG_INFO("📄 Result:");
+    // LOG_INFO("  - Distance to point: " << distanceToTarget << "[m]");
+    // LOG_INFO("  - Speed: " << speed << "[m/s]");
+    // LOG_INFO("  - Time required: " << result << "[s]");
 
     return true;
 }
@@ -892,7 +902,7 @@ bool getClosestTargetIndexByTime(size_t& result,
     const size_t& targets_number, 
     const float timesToDropPoint[])
 {
-    LOG_PROCESS("Searching for target with minimal time to drop point...");
+    // LOG_PROCESS("Searching for target with minimal time to drop point...");
 
     if (targets_number == 0)
     {
@@ -914,10 +924,55 @@ bool getClosestTargetIndexByTime(size_t& result,
 
     result = closest;
 
-    LOG_SUCCESS("Successfully found closest target by time to drop point");
+    // LOG_SUCCESS("Successfully found closest target by time to drop point");
 
-    LOG_INFO("📄 Result:");
-    LOG_INFO("  - Target with minimal time to drop point: " << result);
+    // LOG_INFO("📄 Result:");
+    // LOG_INFO("  - Target with minimal time to drop point: " << result);
+
+    return true;
+}
+
+bool getDeltaAngle(float& result,
+    const float& droneX, const float& droneY,
+    const float& droneDir,
+    const float& targetX, const float& targetY)
+{
+    // LOG_PROCESS("Calculating angle difference (drone → target)...");
+
+    float dx = targetX - droneX;
+    float dy = targetY - droneY;
+
+    float targetAngle = std::atan2(dy, dx);
+    float deltaAngle = targetAngle - droneDir;
+
+    while (deltaAngle > M_PI)
+        deltaAngle -= 2.0f * M_PI;
+
+    while (deltaAngle < -M_PI)
+        deltaAngle += 2.0f * M_PI;
+
+    result = deltaAngle;
+
+    // LOG_SUCCESS("Successfully calculated delta angle");
+
+    // LOG_INFO("📄 Result:");
+    LOG_INFO("  - Angle difference: " << result << "[rad]");
+
+    return true;
+}
+
+bool getAcceleration(float& result, const InputData& inputData)
+{
+    LOG_PROCESS("Calculating dron acceleration...");
+
+    float acceleration = (inputData.attackSpeed * inputData.attackSpeed) / (2.0f * inputData.accelerationPath);
+   
+    result = acceleration;
+
+    // LOG_SUCCESS("Successfully calculated acceleration");
+
+    // LOG_INFO("📄 Result:");
+    LOG_INFO("  - Dron acceleration: " << acceleration);
 
     return true;
 }
@@ -977,15 +1032,15 @@ int main()
     state.droneZ = inputData.zd;
 
     state.droneDir = inputData.initialDir;
+    state.droneState = STOPPED;
 
     const size_t targets_number = 2; // TARGET_COUNT
 
     int count = 1;
-    while (count <= 5) // < SIM_MAX_STEPS
+    while (count <= 50) // < SIM_MAX_STEPS
     {
         LOG_INFO("------ FRAME " << count << " ------");
         LOG_INFO("Total simulation time elapsed: " << state.totalSimTime << "[s]");
-
 
         InterpolationResult interpolateResults[targets_number]{};
         for (size_t i = 0; i < targets_number; i++)
@@ -1012,6 +1067,9 @@ int main()
         float targetDistances[targets_number];
         Vec2 predictedPositions[targets_number]{};
         float timesToDropPoint[targets_number]{};
+        float dropDistances[targets_number];
+        Vec2 dropPoints[targets_number];
+
         for (size_t i = 0; i < targets_number; i++) 
         {
             float targetX = interpolateResults[i].resultX;
@@ -1030,23 +1088,25 @@ int main()
             }
 
             float distanceToTarget = 0.0f;
-            if (!getDistanceToTarget(distanceToTarget, inputData.xd, inputData.yd, targetX, targetY)) 
+            if (!getDistanceToTarget(distanceToTarget, state.droneX, state.droneY, targetX, targetY)) 
             {
                 return 1;
             }
             targetDistances[i] = distanceToTarget;
 
             OutputData outputData{};
-            if (!getAmmoDropPoint(outputData, inputData, ammoInfo, distanceToTarget, horizontalFlightRange, targetX, targetY)) 
+            if (!getAmmoDropPoint(outputData, inputData, state.droneX, state.droneY, ammoInfo, distanceToTarget, horizontalFlightRange, targetX, targetY)) 
             {
                 return 1;
             }
+            dropPoints[i] = {outputData.fireX, outputData.fireY};
 
             float distanceToDropPoint = 0.0f;
-            if (!getDistanceToTarget(distanceToDropPoint, inputData.xd, inputData.yd, outputData.fireX, outputData.fireY)) 
+            if (!getDistanceToTarget(distanceToDropPoint, state.droneX, state.droneY, outputData.fireX, outputData.fireY)) 
             {
                 return 1;
             }
+            dropDistances[i] = distanceToDropPoint;
 
             float timeToDropPoint = 0.0f;
             if (!getTimeToTarget(timeToDropPoint, distanceToDropPoint, inputData.attackSpeed)) 
@@ -1073,11 +1133,167 @@ int main()
             return 1;
         }
 
+        state.currentTargetIndex = closestTargetIndex;
+
         LOG_INFO("");
         LOG_INFO("  - Best target index: " << closestTargetIndex);
         LOG_INFO("  - Time to drop point: " << timesToDropPoint[closestTargetIndex]);
-        LOG_INFO("  - Distance to target: " << targetDistances[closestTargetIndex]);
+        LOG_INFO("  - Distance to CURRENT target: " << targetDistances[closestTargetIndex]);
+        float predictedDistance = 0;
+        if (!getDistanceToTarget(predictedDistance,
+            state.droneX, state.droneY,
+            dropPoints[state.currentTargetIndex].x,
+            dropPoints[state.currentTargetIndex].y))
+        {
+            return 1;
+        }
+        LOG_INFO("  - Distance to PREDICTED target: " << predictedDistance);        
         LOG_INFO("");
+
+        float deltaAngle = 0;
+        if (!getDeltaAngle(deltaAngle, 
+            state.droneX, state.droneY, 
+            state.droneDir, 
+            dropPoints[state.currentTargetIndex].x,
+            dropPoints[state.currentTargetIndex].y)) 
+        {
+            return 1;
+        }
+
+        const float maxTrunStep = inputData.angularSpeed * inputData.simTimeStep; // 1 * 0.1
+        const float absAngle = std::fabs(deltaAngle); 
+        const bool hardTurn = absAngle > inputData.turnThreshold;
+
+        LOG_INFO("");
+        LOG_INFO("  - Drone velocity: " << state.droneVelocity);
+        LOG_INFO("");
+
+        switch (state.droneState)
+        {
+            case STOPPED:
+            {
+                LOG_INFO("Action STATE: STOPPED");
+
+                state.droneVelocity = 0.0f;
+                state.droneState = ACCELERATING;
+                break;
+            }
+            case MOVING:
+            {
+                LOG_INFO("Action STATE: MOVING");
+
+                if (hardTurn)
+                {
+                    state.droneState = DECELERATING;
+                    break;
+                }
+
+                float acceleration = 0;
+                getAcceleration(acceleration, inputData);
+
+                float stoppingDistance = (state.droneVelocity * state.droneVelocity) / 
+                                        (2.0f * acceleration);
+
+                if (dropDistances[state.currentTargetIndex] <= stoppingDistance)
+                {
+                    state.droneState = DECELERATING;
+                    break;
+                }
+
+                float dt = inputData.simTimeStep;
+
+                state.droneX += state.droneVelocity * std::cos(state.droneDir) * dt;
+                state.droneY += state.droneVelocity * std::sin(state.droneDir) * dt;
+                break;
+            }
+            case TURNING:
+            {
+                LOG_INFO("Action STATE: TURNING");
+
+                float appliedTurn = deltaAngle; 
+                if (appliedTurn > maxTrunStep) 
+                { 
+                    appliedTurn = maxTrunStep;
+                } 
+                else if (appliedTurn < -maxTrunStep)
+                { 
+                    appliedTurn = -maxTrunStep; 
+                }
+
+                state.droneDir += appliedTurn;
+
+                float newDeltaAngle = 0;
+                if (!getDeltaAngle(newDeltaAngle, 
+                    state.droneX, state.droneY, 
+                    state.droneDir, 
+                    dropPoints[state.currentTargetIndex].x,
+                    dropPoints[state.currentTargetIndex].y)) 
+                {
+                    return 1;
+                }
+
+                if (std::fabs(newDeltaAngle) <= 0.00005f)
+                {
+                    state.droneState = ACCELERATING;
+                }
+                break;
+            }
+            case ACCELERATING:
+            {
+                LOG_INFO("Action STATE: ACCELERATING");
+
+                if (hardTurn)
+                {
+                    state.droneState = DECELERATING;
+                    break;
+                }
+
+                float acceleration = 0;
+                if (!getAcceleration(acceleration, inputData)) 
+                {
+                    return 1;
+                }
+
+                float stoppingDistance = (state.droneVelocity * state.droneVelocity) / 
+                                        (2.0f * acceleration);
+
+                if (dropDistances[state.currentTargetIndex] <= stoppingDistance)
+                {
+                    state.droneState = DECELERATING;
+                    break;
+                }
+
+                state.droneVelocity += acceleration * inputData.simTimeStep;
+                if (state.droneVelocity >= inputData.attackSpeed)
+                {
+                    state.droneVelocity = inputData.attackSpeed;
+                    state.droneState = MOVING;
+                }
+                break;
+            }
+            case DECELERATING:
+            {
+                LOG_INFO("Action STATE: DECELERATING");
+
+                float acceleration = 0;
+                if (!getAcceleration(acceleration, inputData)) 
+                {
+                    return 1;
+                }
+
+                state.droneVelocity -= acceleration * inputData.simTimeStep;
+                if (state.droneVelocity <= 0.0f)
+                {
+                    state.droneVelocity = 0.0f;
+                    state.droneState = TURNING;
+                }
+                break;
+            }
+            default:
+            {
+                // ...
+            }
+        }
 
         state.totalSimTime = count * inputData.simTimeStep;
         count++;
@@ -1086,3 +1302,24 @@ int main()
 
     return 0;
 }
+
+        // if (absAngle <= inputData.turnThreshold)
+        // { 
+        //     LOG_INFO("Soft turn (no stop required)"); 
+        //     float appliedTurn = deltaAngle; 
+        //     if (appliedTurn > maxTrunStep) 
+        //     { 
+        //         appliedTurn = maxTrunStep;
+        //     } 
+        //     else if (appliedTurn < -maxTrunStep)
+        //     { 
+        //         appliedTurn = -maxTrunStep; 
+        //     }
+        //     state.droneDir += appliedTurn;
+        //      state.droneState = MOVING;
+        // } 
+        // else
+        // { 
+        //     LOG_INFO("Hard turn (STOP required)"); 
+        //     state.droneState = DECELERATING;
+        // }
