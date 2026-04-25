@@ -14,6 +14,7 @@
 #define GRAVITATIONAL_ACCELERATION 9.81f
 #define TARGET_COUNT 5
 #define TARGET_TIME_STEPS 60
+#define SIM_MAX_STEPS 10000
 
 struct SimState {
     float totalSimTime = 0.0f;
@@ -241,6 +242,11 @@ enum DronState
     MOVING,
 };
 
+struct Vec2 {
+    float x;
+    float y;
+};
+
 /**
  *     | Назва       | m (кг) | d (drag) | l (lift) | Тип               |
  *     ------------------------------------------------------------------
@@ -383,7 +389,7 @@ bool getTargetsData(const std::string& file_name, TargetsData& targetsData)
     return true;
 }
 
-bool getAmmoInfoByType(const std::string ammo_name, AmmoInfo& outAmmo)
+bool getAmmoInfoByType(const std::string ammo_name, AmmoInfo& ammoInfo)
 {
     LOG_PROCESS("Searching ammo info for " << ammo_name << "...");
 
@@ -395,338 +401,331 @@ bool getAmmoInfoByType(const std::string ammo_name, AmmoInfo& outAmmo)
     }
 
     LOG_SUCCESS("Successfully found ammo type.");
-    outAmmo = it->second;
+    ammoInfo = it->second;
 
     LOG_INFO("📄 Result:");
-    LOG_INFO("  - m: " << outAmmo.m);
-    LOG_INFO("  - d: " << outAmmo.d);
-    LOG_INFO("  - l: " << outAmmo.l);
-    LOG_INFO("  - isFreeFall: " << (outAmmo.isFreeFall ? "true" : "false"));
+    LOG_INFO("  - m: " << ammoInfo.m);
+    LOG_INFO("  - d: " << ammoInfo.d);
+    LOG_INFO("  - l: " << ammoInfo.l);
+    LOG_INFO("  - isFreeFall: " << (ammoInfo.isFreeFall ? "true" : "false"));
 
     return true;
 }
 
-// bool getAmmoTimeOfFlight(float& result, const InputData& inputData, const AmmoInfo& outAmmo)
-// {
-//     LOG_PROCESS("Calculating time of fly...");
+bool getAmmoTimeOfFlight(float& result, 
+    const InputData& inputData, 
+    const AmmoInfo& ammoInfo)
+{
+    LOG_PROCESS("Calculating time of fly...");
 
-//     float d = outAmmo.d;
-//     float m = outAmmo.m;
-//     float l = outAmmo.l;
-//     float v0 = inputData.attackSpeed;
-//     float z0 = inputData.zd;
+    float d = ammoInfo.d;
+    float m = ammoInfo.m;
+    float l = ammoInfo.l;
+    float v0 = inputData.attackSpeed;
+    float z0 = inputData.zd;
 
-//     // a · t³ + b · t² + c = 0
-//     // a = d·g·m − 2d²·l·V₀
-//     // b = −3g·m² + 3d·l·m·V₀
-//     // c = 6m²·Z₀
-//     // V₀ — швидкість атаки дрона, Z₀ — висота дрона (zd), g = 9.81 м/с².
-//     float a = (d * GRAVITATIONAL_ACCELERATION * m) - 2 * d * d * l * v0;
-//     if (std::abs(a) < 1e-6f)
-//     {
-//         LOG_ERROR("Invalid a: we cannot divide by zero");
-//         return false;
-//     }
-//     float b = (-1) * 3 * GRAVITATIONAL_ACCELERATION * m * m + 3 * d * l * m * v0;
-//     float c = 6 * m * m * z0;
+    // a · t³ + b · t² + c = 0
+    // a = d·g·m − 2d²·l·V₀
+    // b = −3g·m² + 3d·l·m·V₀
+    // c = 6m²·Z₀
+    // V₀ — швидкість атаки дрона, Z₀ — висота дрона (zd), g = 9.81 м/с².
+    float a = (d * GRAVITATIONAL_ACCELERATION * m) - 2 * d * d * l * v0;
+    if (std::abs(a) < 1e-6f)
+    {
+        LOG_ERROR("Invalid a: we cannot divide by zero");
+        return false;
+    }
+    float b = (-1) * 3 * GRAVITATIONAL_ACCELERATION * m * m + 3 * d * l * m * v0;
+    float c = 6 * m * m * z0;
 
-//     // p = − b² / (3a²)
-//     // q = 2b³ / (27a³) + c / a
-//     // φ = arccos( 3q / (2p) · √(−3/p) )
-//     float p = (-1) * b * b / (3 * a * a);
-//     if (p >= 0.0f)
-//     {
-//         LOG_ERROR("Invalid p: must be negative for Cardano trig solution");
-//         return false;
-//     }
-//     float q = 2 * b * b * b / (27 * a * a * a) + c / a;
+    // p = − b² / (3a²)
+    // q = 2b³ / (27a³) + c / a
+    // φ = arccos( 3q / (2p) · √(−3/p) )
+    float p = (-1) * b * b / (3 * a * a);
+    if (p >= 0.0f)
+    {
+        LOG_ERROR("Invalid p: must be negative for Cardano trig solution");
+        return false;
+    }
+    float q = 2 * b * b * b / (27 * a * a * a) + c / a;
 
-//     float arg = (3 * q) / (2 * p) * std::sqrt(-3 / p);
-//     if (arg < -1.0f || arg > 1.0f)
-//     {
-//         LOG_ERROR("Invalid acos argument: out of range");
-//         return false;
-//     }
-//     float f = std::acos(arg);
+    float arg = (3 * q) / (2 * p) * std::sqrt(-3 / p);
+    if (arg < -1.0f || arg > 1.0f)
+    {
+        LOG_ERROR("Invalid acos argument: out of range");
+        return false;
+    }
+    float f = std::acos(arg);
 
-//     // t = 2√(−p/3) · cos( (φ + 4π) / 3 ) − b / (3a)
-//     float t = 2 * std::sqrt((p * (-1)) / 3) * std::cos((f + 4 * M_PI) / 3) - b / (3 * a);
-//     LOG_SUCCESS("Successfully found time of flight");
+    // t = 2√(−p/3) · cos( (φ + 4π) / 3 ) − b / (3a)
+    float t = 2 * std::sqrt((p * (-1)) / 3) * std::cos((f + 4 * M_PI) / 3) - b / (3 * a);
+    LOG_SUCCESS("Successfully found time of flight");
 
-//     LOG_INFO("📄 Result:");
-//     LOG_INFO("  - t: " << t);
+    LOG_INFO("📄 Result:");
+    LOG_INFO("  - t: " << t);
 
-//     result = t;
-//     return true;
-// }
+    result = t;
+    return true;
+}
 
-// bool getHorizontalFlightRange(float& result, const InputData& inputData, const AmmoInfo& outAmmo, const float& ammoTimeOfFlight)
-// {
-//     LOG_PROCESS("Calculating horizontal flight range...");
+bool getHorizontalFlightRange(float& result, 
+    const InputData& inputData, 
+    const AmmoInfo& ammoInfo, 
+    const float& ammoTimeOfFlight)
+{
+    LOG_PROCESS("Calculating horizontal flight range...");
 
-//     // h = V₀t 
-//     //      − t²d·V₀/(2m)
-//     //      + t³(6d·g·l·m − 6d²(l²-1)·V₀)/(36m²)
-//     //      + t⁴(
-//     //              −6d²g·l·(1+l²+l⁴)m
-//     //              + 3d³l²(1+l²)V₀
-//     //              + 6d³l⁴(1+l²)V₀
-//     //          ) / (36(1+l²)²m³)
-//     //      + t⁵(
-//     //              3d³g·l³m
-//     //              − 3d⁴l²(1+l²)V₀
-//     //          ) / (36(1+l²)m⁴)
+    // h = V₀t 
+    //      − t²d·V₀/(2m)
+    //      + t³(6d·g·l·m − 6d²(l²-1)·V₀)/(36m²)
+    //      + t⁴(
+    //              −6d²g·l·(1+l²+l⁴)m
+    //              + 3d³l²(1+l²)V₀
+    //              + 6d³l⁴(1+l²)V₀
+    //          ) / (36(1+l²)²m³)
+    //      + t⁵(
+    //              3d³g·l³m
+    //              − 3d⁴l²(1+l²)V₀
+    //          ) / (36(1+l²)m⁴)
 
-//     // V₀ — швидкість атаки дрона, Z₀ — висота дрона (zd), g = 9.81 м/с²
-//     // t - час польоту снаряду (Time of Flight)
+    // V₀ — швидкість атаки дрона, Z₀ — висота дрона (zd), g = 9.81 м/с²
+    // t - час польоту снаряду (Time of Flight)
 
-//     float t = ammoTimeOfFlight;
-//     float d = outAmmo.d;
-//     float m = outAmmo.m;
-//     if (std::abs(m) < 1e-6f)
-//     {
-//         LOG_ERROR("Invalid m: we cannot divide by zero");
-//         return false;
-//     }
-//     float l = outAmmo.l;
-//     float v0 = inputData.attackSpeed;
+    float t = ammoTimeOfFlight;
+    float d = ammoInfo.d;
+    float m = ammoInfo.m;
+    if (std::abs(m) < 1e-6f)
+    {
+        LOG_ERROR("Invalid m: we cannot divide by zero");
+        return false;
+    }
+    float l = ammoInfo.l;
+    float v0 = inputData.attackSpeed;
 
-//     float t2 = t * t;
-//     float t3 = t2 * t;
-//     float t4 = t2 * t2;
-//     float t5 = t4 * t;
+    float t2 = t * t;
+    float t3 = t2 * t;
+    float t4 = t2 * t2;
+    float t5 = t4 * t;
 
-//     float d2 = d * d;
-//     float d3 = d2 * d;
-//     float d4 = d2 * d2;
+    float d2 = d * d;
+    float d3 = d2 * d;
+    float d4 = d2 * d2;
 
-//     float m2 = m * m;
-//     float m3 = m2 * m;
-//     float m4 = m2 * m2;
+    float m2 = m * m;
+    float m3 = m2 * m;
+    float m4 = m2 * m2;
 
-//     float l2 = l * l;
-//     float l3 = l2 * l;
-//     float l4 = l2 * l2;
+    float l2 = l * l;
+    float l3 = l2 * l;
+    float l4 = l2 * l2;
 
-//     // V₀t
-//     float step0 = v0 * t;
+    // V₀t
+    float step0 = v0 * t;
 
-//     // − t²d·V₀/(2m)
-//     float step1 = ((-1) * t2 * d * v0) / (2 * m);
+    // − t²d·V₀/(2m)
+    float step1 = ((-1) * t2 * d * v0) / (2 * m);
 
-//     // + t³(6d·g·l·m − 6d²(l²-1)·V₀)/(36m²)
-//     float step2 = t3 * ((6 * d * GRAVITATIONAL_ACCELERATION * l * m) - (6 * d2 * (l2 - 1) * v0)) / (36 * m2);
+    // + t³(6d·g·l·m − 6d²(l²-1)·V₀)/(36m²)
+    float step2 = t3 * ((6 * d * GRAVITATIONAL_ACCELERATION * l * m) - (6 * d2 * (l2 - 1) * v0)) / (36 * m2);
 
-//     // −6d²g·l·(1+l²+l⁴)m
-//     float step3_0 = (-1) * 6 * d2 * GRAVITATIONAL_ACCELERATION * l * (1 + l2 + l4) * m;
-//     // + 3d³l²(1+l²)V₀
-//     float step3_1 = 3 * d3 * l2 * (1 + l2) * v0;
-//     // + 6d³l⁴(1+l²)V₀
-//     float step3_2 = 6 * d3 * l4 * (1 + l2) * v0;
-//     // 36(1+l²)²m³
-//     float step3_3 = 36 * (1 + l2) * (1 + l2) * m3;
+    // −6d²g·l·(1+l²+l⁴)m
+    float step3_0 = (-1) * 6 * d2 * GRAVITATIONAL_ACCELERATION * l * (1 + l2 + l4) * m;
+    // + 3d³l²(1+l²)V₀
+    float step3_1 = 3 * d3 * l2 * (1 + l2) * v0;
+    // + 6d³l⁴(1+l²)V₀
+    float step3_2 = 6 * d3 * l4 * (1 + l2) * v0;
+    // 36(1+l²)²m³
+    float step3_3 = 36 * (1 + l2) * (1 + l2) * m3;
 
-//     float step3 = t4 * (step3_0 + step3_1 + step3_2) / step3_3;
+    float step3 = t4 * (step3_0 + step3_1 + step3_2) / step3_3;
 
-//     // 3d³g·l³m
-//     float step4_0 = 3 * d3 * GRAVITATIONAL_ACCELERATION * l3 * m;
-//     // − 3d⁴l²(1+l²)V₀
-//     float step4_1 = (-1) * 3 * d4 * l2 * (1 + l2)* v0;
-//     // 36(1+l²)m⁴
-//     float step4_2 = 36 * (1 + l2) * m4;
+    // 3d³g·l³m
+    float step4_0 = 3 * d3 * GRAVITATIONAL_ACCELERATION * l3 * m;
+    // − 3d⁴l²(1+l²)V₀
+    float step4_1 = (-1) * 3 * d4 * l2 * (1 + l2)* v0;
+    // 36(1+l²)m⁴
+    float step4_2 = 36 * (1 + l2) * m4;
 
-//     float step4 = t5 * (step4_0 + step4_1) / step4_2;
+    float step4 = t5 * (step4_0 + step4_1) / step4_2;
 
-//     float h = step0 + step1 + step2 + step3 + step4;
+    float h = step0 + step1 + step2 + step3 + step4;
 
-//     LOG_SUCCESS("Successfully calculated horizontal flight range");
+    LOG_SUCCESS("Successfully calculated horizontal flight range");
 
-//     LOG_INFO("📄 Result:");
-//     LOG_INFO("  - h: " << h);
+    LOG_INFO("📄 Result:");
+    LOG_INFO("  - h: " << h << "[m]");
 
-//     result = h;
-//     return true;
-// }
+    result = h;
+    return true;
+}
 
-// bool getDistanceToTarget(float& result, const InputData& inputData)
-// {
-//     LOG_PROCESS("Calculating horizontal distance from copter to target...");
+bool getDistanceToTarget(float& result, 
+    const float& droneX,
+    const float& droneY,
+    const float& targetX, 
+    const float& targetY)
+{
+    LOG_PROCESS("Calculating horizontal distance from copter to target...");
 
-//     // D = √( (targetX − xd)² + (targetY − yd)² )
-//     // targetX, targetY - координати цілі
-//     // xd, yd - координати дрона
+    // D = √( (targetX − xd)² + (targetY − yd)² )
+    // targetX, targetY - координати цілі
+    // xd, yd - координати дрона
 
-//     float xDiff = inputData.targetX - inputData.xd;
-//     float yDiff = inputData.targetY - inputData.yd;
+    float xDiff = targetX - droneX;
+    float yDiff = targetY - droneY;
 
-//     float step0 = xDiff * xDiff;
-//     float step1 = yDiff * yDiff;
+    float step0 = xDiff * xDiff;
+    float step1 = yDiff * yDiff;
 
-//     float D = std::sqrt(step0 + step1);
+    float D = std::sqrt(step0 + step1);
 
-//     LOG_SUCCESS("Successfully calculated distance from drone to target");
+    LOG_SUCCESS("Successfully calculated distance from drone to target");
 
-//     LOG_INFO("📄 Result:");
-//     LOG_INFO("  - D: " << D);
+    LOG_INFO("📄 Result:");
+    LOG_INFO("  - D: " << D << "[m]");
 
-//     result = D;
-//     return true;
-// }
+    result = D;
+    return true;
+}
 
-// bool isManeuverRequired(const float& h, const float& accelerationPath, const float& D)
-// {
-//     bool result = (h + accelerationPath) > D;
-//     if (result)
-//     {
-//         LOG_WARN("Maneuver required: drone is too close to the target.");
-//     }
-//     else
-//     {
-//         LOG_SUCCESS("No maneuver required: drone is at correct release distance.");
-//     }
-//     return result;
-// }
+bool isManeuverRequired(const float& h, 
+    const float& accelerationPath, 
+    const float& D)
+{
+    bool result = (h + accelerationPath) > D;
+    if (result)
+    {
+        LOG_WARN("Maneuver required: drone is too close to the target.");
+    }
+    else
+    {
+        LOG_SUCCESS("No maneuver required: drone is at correct release distance.");
+    }
+    return result;
+}
 
-// bool getNewDroneCoordinatesForManeuver(float& newX, float& newY, const InputData& inputData, const float& D, const float& h)
-// {
-//     LOG_PROCESS("Calculating new drone coordinates for maneuver...");    
+bool getNewDroneCoordinatesForManeuver(float& newX, 
+    float& newY, 
+    const InputData& inputData, 
+    const float& D, 
+    const float& h, 
+    const float& targetX, 
+    const float& targetY)
+{
+    LOG_PROCESS("Calculating new drone coordinates for maneuver...");    
 
-//     // xd' = targetX − (targetX − xd) · (h + accelerationPath) / D
-//     // yd' = targetY − (targetY − yd) · (h + accelerationPath) / D
+    // xd' = targetX − (targetX − xd) · (h + accelerationPath) / D
+    // yd' = targetY − (targetY − yd) · (h + accelerationPath) / D
 
-//     if (std::abs(D) < 1e-6f)
-//     {
-//         LOG_ERROR("Invalid D: we cannot divide by zero");
-//         return false;
-//     }
+    if (std::abs(D) < 1e-6f)
+    {
+        LOG_ERROR("Invalid D: we cannot divide by zero");
+        return false;
+    }
 
-//     float step0 = (h + inputData.accelerationPath) / D;
+    float step0 = (h + inputData.accelerationPath) / D;
 
-//     newX = inputData.targetX - (inputData.targetX - inputData.xd) * step0;
-//     newY = inputData.targetY - (inputData.targetY - inputData.yd) * step0;
+    newX = targetX - (targetX - inputData.xd) * step0;
+    newY = targetY - (targetY - inputData.yd) * step0;
 
-//     LOG_SUCCESS("Successfully calculated new drone coordinates for maneuver.");
+    LOG_SUCCESS("Successfully calculated new drone coordinates for maneuver.");
 
-//     LOG_INFO("📄 Result:");
-//     LOG_INFO("  - xd': " << newX);
-//     LOG_INFO("  - yd': " << newY);
+    LOG_INFO("📄 Result:");
+    LOG_INFO("  - xd': " << newX);
+    LOG_INFO("  - yd': " << newY);
 
-//     return true;
-// }
+    return true;
+}
 
-// bool getAmmoDropPoint(OutputData& outputData, const InputData& inputData, const AmmoInfo& outAmmo, const float& D, const float& h)
-// {
-//     LOG_PROCESS("Calculating ammo drop point...");    
+bool getAmmoDropPoint(OutputData& outputData, 
+    const InputData& inputData, 
+    const AmmoInfo& ammoInfo, 
+    const float& D, 
+    const float& h, 
+    const float& targetX, 
+    const float& targetY)
+{
+    LOG_PROCESS("Calculating ammo drop point...");    
 
-//     // ratio = (D − h) / D
-//     // fireX = xd + (targetX − xd) · ratio
-//     // fireY = yd + (targetY − yd) · ratio
+    // ratio = (D − h) / D
+    // fireX = xd + (targetX − xd) · ratio
+    // fireY = yd + (targetY − yd) · ratio
 
-//     if (std::abs(D) < 1e-6f)
-//     {
-//         LOG_ERROR("Invalid D: we cannot divide by zero");
-//         return false;
-//     }
+    if (std::abs(D) < 1e-6f)
+    {
+        LOG_ERROR("Invalid D: we cannot divide by zero");
+        return false;
+    }
 
-//     float newXd = inputData.xd;
-//     float newYd = inputData.yd;
-//     float newH = h;
-//     float newD = D;
-//     auto newInputData = inputData;
-//     if (isManeuverRequired(h, inputData.accelerationPath, D))
-//     {
-//         if (!getNewDroneCoordinatesForManeuver(newXd, newYd, inputData, D, h)) 
-//         {
-//             return false;
-//         }
+    float newXd = inputData.xd;
+    float newYd = inputData.yd;
+    float newH = h;
+    float newD = D;
+    auto newInputData = inputData;
+    if (isManeuverRequired(h, inputData.accelerationPath, D))
+    {
+        if (!getNewDroneCoordinatesForManeuver(newXd, newYd, inputData, D, h, targetX, targetY)) 
+        {
+            return false;
+        }
 
-//         outputData.postManeuverX = newXd;
-//         outputData.postManeuverY = newYd;
-//         outputData.isRecalculated = true;
+        outputData.postManeuverX = newXd;
+        outputData.postManeuverY = newYd;
+        outputData.isRecalculated = true;
 
-//         newInputData.xd = newXd;
-//         newInputData.yd = newYd;
+        newInputData.xd = newXd;
+        newInputData.yd = newYd;
 
-//         if (!getDistanceToTarget(newD, newInputData)) 
-//         {
-//             return false;
-//         }
-//         if (std::abs(newD) < 1e-6f)
-//         {
-//             LOG_ERROR("Invalid D: we cannot divide by zero");
-//             return false;
-//         }
+        if (!getDistanceToTarget(newD, newInputData.xd, newInputData.yd, targetX, targetY)) 
+        {
+            return false;
+        }
+        if (std::abs(newD) < 1e-6f)
+        {
+            LOG_ERROR("Invalid D: we cannot divide by zero");
+            return false;
+        }
 
-//         float ammoTimeOfFlight = 0.0f;
-//         if (!getAmmoTimeOfFlight(ammoTimeOfFlight, newInputData, outAmmo)) 
-//         {
-//             return false;
-//         }
+        float ammoTimeOfFlight = 0.0f;
+        if (!getAmmoTimeOfFlight(ammoTimeOfFlight, newInputData, ammoInfo)) 
+        {
+            return false;
+        }
 
-//         if (!getHorizontalFlightRange(newH, newInputData, outAmmo, ammoTimeOfFlight)) 
-//         {
-//             return false;
-//         }
-//     }
+        if (!getHorizontalFlightRange(newH, newInputData, ammoInfo, ammoTimeOfFlight)) 
+        {
+            return false;
+        }
+    }
 
-//     float ratio = (newD - newH) / newD;
+    float ratio = (newD - newH) / newD;
 
-//     outputData.fireX = newInputData.xd + (newInputData.targetX - newInputData.xd) * ratio;
-//     outputData.fireY = newInputData.yd + (newInputData.targetY - newInputData.yd) * ratio;
+    outputData.fireX = newInputData.xd + (targetX - newInputData.xd) * ratio;
+    outputData.fireY = newInputData.yd + (targetY - newInputData.yd) * ratio;
 
-//     LOG_SUCCESS("Successfully calculated ammo drop point.");
+    LOG_SUCCESS("Successfully calculated ammo drop point.");
 
-//     LOG_INFO("📄 Result:");
-//     LOG_INFO("  - fireX: " << outputData.fireX);
-//     LOG_INFO("  - fireY: " << outputData.fireY);
+    LOG_INFO("📄 Result:");
+    LOG_INFO("  - fireX: " << outputData.fireX);
+    LOG_INFO("  - fireY: " << outputData.fireY);
 
-//     return true;
-// }
-
-// bool writeOutputToFile(const std::string& file_name, const OutputData& outputData)
-// {
-//     LOG_PROCESS("Writing result to " << file_name << "...");
-
-//     std::ofstream file(file_name);
-//     if (!file)
-//     {
-//         LOG_ERROR("Error opening file");
-//         return false;
-//     }
-
-//     if (outputData.isRecalculated)
-//     {
-//         file << outputData.postManeuverX << " " << outputData.postManeuverY << " ";
-//     }
-//     file << outputData.fireX << " " << outputData.fireY;
-
-//     if (file.fail())
-//     {
-//         LOG_ERROR("Failed while writing to file");
-//         return false;
-//     }
-
-//     file.close();
-
-//     LOG_SUCCESS("Successfully wrote result to file");
-//     return true;
-// }
+    return true;
+}
 
 struct InterpolationResult
 {
     float resultX; 
     float resultY;
-    size_t idx;
-    size_t next;
-    float frac;
 };
 
 bool interpolate(InterpolationResult& result, 
-    const int targetIndex,
-    const SimState& state, 
+    const int& targetIndex,
+    const float& timeFrame,
     const InputData& inputData, 
     const TargetsData& targetsData)
 {
+    LOG_PROCESS("Calculating new interpolated position...");
+
     /**
      * int idx = (int)floor(t / arrayTimeStep) % 60;
      * int next = (idx + 1) % 60;
@@ -743,14 +742,11 @@ bool interpolate(InterpolationResult& result,
         return false;
     }
 
-    float t = state.totalSimTime;
+    float t = timeFrame;
     
-    int idx = (int)std::floorf(t / inputData.arrayTimeStep) % 60;
-    result.idx = idx;
-    int next = (idx + 1) % 60;
-    result.next = next;
+    int idx = (int)std::floorf(t / inputData.arrayTimeStep) % TARGET_TIME_STEPS;
+    int next = (idx + 1) % TARGET_TIME_STEPS;
     float frac = (t - idx * inputData.arrayTimeStep) / inputData.arrayTimeStep;
-    result.frac = frac;
 
     float x0 = targetsData.targetXInTime[targetIndex][idx];
     float x1 = targetsData.targetXInTime[targetIndex][next];
@@ -774,6 +770,182 @@ bool interpolate(InterpolationResult& result,
     return true;
 }
 
+bool getTargetVelocity(Vec2& result, 
+    const int targetIndex,
+    const SimState& state, 
+    const InputData& inputData, 
+    const TargetsData& targetsData)
+{
+    LOG_PROCESS("Calculating target velocity...");
+
+    /**
+     * float dx = targetX(t + dt) - targetX(t);
+     * float dy = targetY(t + dt) - targetY(t);
+     * float targetVx = dx / dt;
+     * float targetVy = dy / dt;
+     * 
+     * t - конретний момент симуляції
+     * dt - малий крок (наприклад, simTimeStep або arrayTimeStep)
+     * targetX(t) - знайти Х координату де буде ціль в момент часу t
+     * targetX(t + dt) - знайти Х координату де буде ціль через dt секунд від моменту t
+     */
+
+    float t = state.totalSimTime;
+    float dt = inputData.simTimeStep;
+
+    if (std::abs(dt) < 1e-6f)
+    {
+        LOG_ERROR("Invalid simTimeStep: we cannot divide by zero");
+        return false;
+    }
+
+    float timeFrame0 = t;
+    float timeFrame1 = t + dt;
+
+    InterpolationResult currentPos{};
+    if (!interpolate(currentPos, targetIndex, timeFrame0, inputData, targetsData))
+    {
+        return false;
+    }
+    InterpolationResult nextPos{};
+    if (!interpolate(nextPos, targetIndex, timeFrame1, inputData, targetsData))
+    {
+        return false;
+    }
+
+    float x0 = currentPos.resultX;
+    float x1 = nextPos.resultX;
+    float dx = x1 - x0;
+
+    float y0 = currentPos.resultY;
+    float y1 = nextPos.resultY;
+    float dy = y1 - y0;
+
+    float targetVx = dx / dt;
+    float targetVy = dy / dt;
+
+    result.x = targetVx;
+    result.y = targetVy;
+
+    LOG_SUCCESS("Successfully calculated velocity for target " << targetIndex);
+
+    LOG_INFO("📄 Result:");
+    LOG_INFO("  - Velocity x: " << targetVx);
+    LOG_INFO("  - Velocity y: " << targetVy);
+
+    return true;
+}
+
+bool getPredictedPosition(Vec2& result, 
+    const float& targetVx, const float& targetVy, 
+    const float& targetX, const float& targetY, 
+    const float& totalTime)
+{
+    LOG_PROCESS("Calculating predicted position...");
+
+    /**
+     * float predictedX = targetX(t) + targetVx * totalTime;
+     * float predictedY = targetY(t) + targetVy * totalTime;
+     * 
+     * targetVx - швидкість цілі по осі x
+     * targetVy - швидкість цілі по осі y
+     * totalTime - орієнтовний час прильоту дрона до точки скиду
+     */
+
+    float predictedX = targetX + targetVx * totalTime;
+    float predictedY = targetY + targetVy * totalTime;
+
+    LOG_SUCCESS("Successfully calculated predicted position");
+
+    LOG_INFO("📄 Result:");
+    LOG_INFO("  - Predicted x: " << predictedX);
+    LOG_INFO("  - Predicted y: " << predictedY);
+
+    return true;
+}
+
+bool getTimeToTarget(float& result, 
+    const float& distanceToTarget, 
+    const float& speed)
+{
+    LOG_PROCESS("Calculating drone travel time to target point...");
+
+    if (std::abs(speed) < 1e-6f)
+    {
+        LOG_ERROR("Invalid speed: cannot divide by zero");
+        return false;
+    }
+
+    result = distanceToTarget / speed;
+
+    LOG_SUCCESS("Successfully calculated time for distance");
+
+    LOG_INFO("📄 Result:");
+    LOG_INFO("  - Distance to point: " << distanceToTarget << "[m]");
+    LOG_INFO("  - Speed: " << speed << "[m/s]");
+    LOG_INFO("  - Time required: " << result << "[s]");
+
+    return true;
+}
+
+bool getClosestTargetIndexByTime(size_t& result, 
+    const size_t& targets_number, 
+    const float timesToDropPoint[])
+{
+    LOG_PROCESS("Searching for target with minimal time to drop point...");
+
+    if (targets_number == 0)
+    {
+        LOG_ERROR("No targets provided");
+        return false;
+    }
+
+    float tempTime = timesToDropPoint[0];
+    size_t closest = 0;
+    for (size_t i = 1; i < targets_number; i++) 
+    {
+        float timeToDrop = timesToDropPoint[i];
+        if (timeToDrop < tempTime)
+        {
+            tempTime = timeToDrop;
+            closest = i;
+        }
+    }
+
+    result = closest;
+
+    LOG_SUCCESS("Successfully found closest target by time to drop point");
+
+    LOG_INFO("📄 Result:");
+    LOG_INFO("  - Target with minimal time to drop point: " << result);
+
+    return true;
+}
+
+// 1) Беремо поточні координати дрона і цілей
+// 2) Для кожної цілі:
+//      оцінюємо точку перехоплення (intercept point)
+//      і рахуємо скільки часу потрібно дрону, щоб до неї дістатися
+//      це і є totalTime (оцінка для цього фрейму)
+// 3) Беремо totalTime і прогнозуємо де буде ціль через цей час
+// 4) Перераховуємо точку перехоплення вже під прогнозовану позицію цілі
+//      (тобто оновлюємо intercept point)
+// 5) Вибираємо найкращу ціль (з мінімальним totalTime)
+// 6) Дрон оновлює напрямок руху (поворот / прискорення / гальмування)
+// 7) Дрон рухається вперед на simTimeStep
+// 8) Переходимо до наступного фрейму
+// 9) На наступному фреймі:
+//      маємо нову позицію дрона
+//      маємо нові (інтерпольовані) позиції цілей
+// 10) Знову для кожної цілі:
+//      рахуємо totalTime до нової точки перехоплення
+// 11) Знову прогнозуємо позицію цілі через цей totalTime
+// 12) Знову уточнюємо точку перехоплення
+// 13) Продовжуємо симуляцію руху дрона
+// 14) Ітеруємося до моменту:
+//      коли дрон входить у hitRadius до точки скиду
+//      і виконується скидання боєприпасу
+
 int main()
 {
     std::string input_file_name = "input.txt";
@@ -794,68 +966,123 @@ int main()
         return 1;
     }
 
+    AmmoInfo ammoInfo{};
+    if (!getAmmoInfoByType(inputData.ammo_name, ammoInfo)) 
+    {
+        return 1;
+    }
+
     state.droneX = inputData.xd;
     state.droneY = inputData.yd;
     state.droneZ = inputData.zd;
 
     state.droneDir = inputData.initialDir;
 
+    const size_t targets_number = 2; // TARGET_COUNT
+
     int count = 1;
-    while (count <= 5)
+    while (count <= 5) // < SIM_MAX_STEPS
     {
         LOG_INFO("------ FRAME " << count << " ------");
         LOG_INFO("Total simulation time elapsed: " << state.totalSimTime << "[s]");
 
-        for (size_t i = 0; i < 2; i++) // i < TARGET_COUNT;
+
+        InterpolationResult interpolateResults[targets_number]{};
+        for (size_t i = 0; i < targets_number; i++)
         {
             InterpolationResult result{};
-            if (!interpolate(result, i, state, inputData, targetsData))
+            if (!interpolate(result, i, state.totalSimTime, inputData, targetsData))
             {
                 return 1;
             }
+            interpolateResults[i] = result;
         }
 
-        // TODO: calculate distance from drone to each target on each frame
+        Vec2 targetVelocities[targets_number];
+        for (size_t i = 0; i < targets_number; i++)
+        {
+            Vec2 targetVelocity{};
+            if (!getTargetVelocity(targetVelocity, i, state, inputData, targetsData))
+            {
+                return 1;
+            }
+            targetVelocities[i] = targetVelocity;
+        }
+
+        float targetDistances[targets_number];
+        Vec2 predictedPositions[targets_number]{};
+        float timesToDropPoint[targets_number]{};
+        for (size_t i = 0; i < targets_number; i++) 
+        {
+            float targetX = interpolateResults[i].resultX;
+            float targetY = interpolateResults[i].resultY;
+
+            float ammoTimeOfFlight = 0.0f;
+            if (!getAmmoTimeOfFlight(ammoTimeOfFlight, inputData, ammoInfo)) 
+            {
+                return 1;
+            }
+
+            float horizontalFlightRange = 0.0f;
+            if (!getHorizontalFlightRange(horizontalFlightRange, inputData, ammoInfo, ammoTimeOfFlight)) 
+            {
+                return 1;
+            }
+
+            float distanceToTarget = 0.0f;
+            if (!getDistanceToTarget(distanceToTarget, inputData.xd, inputData.yd, targetX, targetY)) 
+            {
+                return 1;
+            }
+            targetDistances[i] = distanceToTarget;
+
+            OutputData outputData{};
+            if (!getAmmoDropPoint(outputData, inputData, ammoInfo, distanceToTarget, horizontalFlightRange, targetX, targetY)) 
+            {
+                return 1;
+            }
+
+            float distanceToDropPoint = 0.0f;
+            if (!getDistanceToTarget(distanceToDropPoint, inputData.xd, inputData.yd, outputData.fireX, outputData.fireY)) 
+            {
+                return 1;
+            }
+
+            float timeToDropPoint = 0.0f;
+            if (!getTimeToTarget(timeToDropPoint, distanceToDropPoint, inputData.attackSpeed)) 
+            {
+                return 1;
+            }
+            timesToDropPoint[i] = timeToDropPoint;
+
+            Vec2 targetVelocity = targetVelocities[i];
+            Vec2 predictedPosition{};
+            if (!getPredictedPosition(predictedPosition, 
+                targetVelocity.x, targetVelocity.y, 
+                targetX, targetY,
+                timeToDropPoint)) 
+            {
+                return 1;
+            }
+            predictedPositions[i] = predictedPosition;
+        }
+
+        size_t closestTargetIndex = 0;
+        if (!getClosestTargetIndexByTime(closestTargetIndex, targets_number, timesToDropPoint)) 
+        {
+            return 1;
+        }
+
+        LOG_INFO("");
+        LOG_INFO("  - Best target index: " << closestTargetIndex);
+        LOG_INFO("  - Time to drop point: " << timesToDropPoint[closestTargetIndex]);
+        LOG_INFO("  - Distance to target: " << targetDistances[closestTargetIndex]);
+        LOG_INFO("");
 
         state.totalSimTime = count * inputData.simTimeStep;
         count++;
         LOG_INFO("");
     }
-    
-    // AmmoInfo ammoInfo{};
-    // if (!getAmmoInfoByType(inputData.ammo_name, ammoInfo)) 
-    // {
-    //     return 1;
-    // }
-
-    // float ammoTimeOfFlight = 0.0f;
-    // if (!getAmmoTimeOfFlight(ammoTimeOfFlight, inputData, ammoInfo)) 
-    // {
-    //     return 1;
-    // }
-
-    // float horizontalFlightRange = 0.0f;
-    // if (!getHorizontalFlightRange(horizontalFlightRange, inputData, ammoInfo, ammoTimeOfFlight)) 
-    // {
-    //     return 1;
-    // }
-
-    // float distanceToTarget = 0.0f;
-    // if (!getDistanceToTarget(distanceToTarget, inputData)) 
-    // {
-    //     return 1;
-    // }
-
-    // OutputData outputData{};
-    // if (!getAmmoDropPoint(outputData, inputData, ammoInfo, distanceToTarget, horizontalFlightRange)) 
-    // {
-    //     return 1;
-    // }
-
-    // if (!writeOutputToFile(output_file_name, outputData)) 
-    // {
-    //     return 1;
-    // }
 
     return 0;
 }
