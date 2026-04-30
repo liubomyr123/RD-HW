@@ -1,15 +1,74 @@
 #include <iostream>
 #include <fstream>
+#include <sstream>
+
 #include <string>
 #include <cstdint>
 #include <cmath>
 #include <unordered_map>
 
-#define LOG_INFO(x)     std::cout << x << "\n"
-#define LOG_PROCESS(x)  std::cout << "🔄 " << x << "\n"
-#define LOG_ERROR(x)    std::cerr << "❌ " << x << "\n"
-#define LOG_WARN(x)     std::cout << "⚠️  " << x << "\n"
-#define LOG_SUCCESS(x)  std::cout << "✅ " << x << "\n"
+class Logger {
+private:
+    std::ofstream file;
+
+    Logger() {
+        file.open("app.log", std::ios::trunc);
+    }
+
+public:
+    static Logger& instance() {
+        static Logger logger;
+        return logger;
+    }
+
+    void log(const std::string& type, const std::string& msg) {
+        std::string line = type + " " + msg;
+
+        std::cout << line << "\n";
+        file << line << "\n";
+    }
+};
+
+#define LOG_INFO(x) \
+    do { \
+        std::ostringstream oss; \
+        oss << x; \
+        Logger::instance().log("", oss.str()); \
+    } while(0)
+
+#define LOG_PROCESS(x) \
+    do { \
+        std::ostringstream oss; \
+        oss << x; \
+        Logger::instance().log("🔄", oss.str()); \
+    } while(0)
+
+#define LOG_ERROR(x) \
+    do { \
+        std::ostringstream oss; \
+        oss << x; \
+        Logger::instance().log("❌", oss.str()); \
+    } while(0)
+
+#define LOG_WARN(x) \
+    do { \
+        std::ostringstream oss; \
+        oss << x; \
+        Logger::instance().log("⚠️", oss.str()); \
+    } while(0)
+
+#define LOG_SUCCESS(x) \
+    do { \
+        std::ostringstream oss; \
+        oss << x; \
+        Logger::instance().log("✅", oss.str()); \
+    } while(0)
+
+// #define LOG_INFO(x)     std::cout << x << "\n"
+// #define LOG_PROCESS(x)  std::cout << "🔄 " << x << "\n"
+// #define LOG_ERROR(x)    std::cerr << "❌ " << x << "\n"
+// #define LOG_WARN(x)     std::cout << "⚠️  " << x << "\n"
+// #define LOG_SUCCESS(x)  std::cout << "✅ " << x << "\n"
 
 #define GRAVITATIONAL_ACCELERATION 9.81f
 #define TARGET_COUNT 5
@@ -108,8 +167,6 @@ struct TargetsData {
 struct OutputData {
     float fireX;
     float fireY;
-    float postManeuverX;
-    float postManeuverY;
     bool isRecalculated;
 };
 
@@ -284,7 +341,7 @@ std::unordered_map<std::string, AmmoInfo> ammo_types_info = {
 
 bool getInputData(const std::string& file_name, InputData& inputData)
 {
-    LOG_PROCESS("Reading " + file_name + "...");
+    // LOG_PROCESS("Reading " + file_name + "...");
 
     std::ifstream file(file_name);
     if (!file) {
@@ -322,10 +379,12 @@ bool getInputData(const std::string& file_name, InputData& inputData)
     }
     else
     {
-        LOG_SUCCESS("Successfully found all params.");
+        // LOG_SUCCESS("Successfully found all params.");
     }
 
+    // Logger::instance().INFO("📄 Result:");
     LOG_INFO("📄 Result:");
+    // Logger::instance().INFO("  - xd: " << inputData.xd);
     LOG_INFO("  - xd: " << inputData.xd);
     LOG_INFO("  - yd: " << inputData.yd);
     LOG_INFO("  - zd: " << inputData.zd);
@@ -341,7 +400,7 @@ bool getInputData(const std::string& file_name, InputData& inputData)
 
     std::string extra;
     if (file >> extra) {
-        // LOG_WARN("Found extra data: " + extra + " (ignored)");
+        LOG_WARN("Found extra data: " + extra + " (ignored)");
     }
 
     return true;
@@ -410,11 +469,11 @@ bool getAmmoInfoByType(const std::string ammo_name, AmmoInfo& ammoInfo)
 
     // LOG_SUCCESS("Successfully found ammo type.");
 
-    // LOG_INFO("📄 Result:");
-    // LOG_INFO("  - m: " << ammoInfo.m);
-    // LOG_INFO("  - d: " << ammoInfo.d);
-    // LOG_INFO("  - l: " << ammoInfo.l);
-    // LOG_INFO("  - isFreeFall: " << (ammoInfo.isFreeFall ? "true" : "false"));
+    LOG_INFO("📄 Result:");
+    LOG_INFO("  - m: " << ammoInfo.m);
+    LOG_INFO("  - d: " << ammoInfo.d);
+    LOG_INFO("  - l: " << ammoInfo.l);
+    LOG_INFO("  - isFreeFall: " << (ammoInfo.isFreeFall ? "true" : "false"));
 
     return true;
 }
@@ -469,8 +528,8 @@ bool getAmmoTimeOfFlight(float& result,
 
     // LOG_SUCCESS("Successfully found time of flight");
 
-    // LOG_INFO("📄 Result:");
-    // LOG_INFO("  - t: " << t);
+    LOG_INFO("📄 Result:");
+    LOG_INFO("  - t: " << t);
 
     result = t;
     return true;
@@ -560,8 +619,8 @@ bool getHorizontalFlightRange(float& result,
 
     // LOG_SUCCESS("Successfully calculated horizontal flight range");
 
-    // LOG_INFO("📄 Result:");
-    // LOG_INFO("  - h: " << h << "[m]");
+    LOG_INFO("📄 Result:");
+    LOG_INFO("  - h: " << h << "[m]");
 
     result = h;
     return true;
@@ -589,8 +648,8 @@ bool getDistanceToTarget(float& result,
 
     // LOG_SUCCESS("Successfully calculated distance from drone to target");
 
-    // LOG_INFO("📄 Result:");
-    // LOG_INFO("  - D: " << D << "[m]");
+    LOG_INFO("📄 Result:");
+    LOG_INFO("  - D: " << D << "[m]");
 
     result = D;
     return true;
@@ -603,11 +662,11 @@ bool isManeuverRequired(const float& h,
     bool result = (h + accelerationPath) > D;
     if (result)
     {
-        // LOG_WARN("Maneuver required: drone is too close to the target.");
+        LOG_WARN("Maneuver required: drone is too close to the target.");
     }
     else
     {
-        // LOG_SUCCESS("No maneuver required: drone is at correct release distance.");
+        LOG_SUCCESS("No maneuver required: drone is at correct release distance.");
     }
     return result;
 }
@@ -638,9 +697,9 @@ bool getNewDroneCoordinatesForManeuver(float& newX,
 
     // LOG_SUCCESS("Successfully calculated new drone coordinates for maneuver.");
 
-    // LOG_INFO("📄 Result:");
-    // LOG_INFO("  - xd': " << newX);
-    // LOG_INFO("  - yd': " << newY);
+    LOG_INFO("📄 Result:");
+    LOG_INFO("  - xd': " << newX);
+    LOG_INFO("  - yd': " << newY);
 
     return true;
 }
@@ -671,22 +730,16 @@ bool getAmmoDropPoint(OutputData& outputData,
     float newYd = droneY;
     float newH = h;
     float newD = D;
-    auto newInputData = inputData;
+
     if (isManeuverRequired(h, inputData.accelerationPath, D))
     {
+        outputData.isRecalculated = true;
         if (!getNewDroneCoordinatesForManeuver(newXd, newYd, inputData, D, h, targetX, targetY)) 
         {
             return false;
         }
 
-        outputData.postManeuverX = newXd;
-        outputData.postManeuverY = newYd;
-        outputData.isRecalculated = true;
-
-        newInputData.xd = newXd;
-        newInputData.yd = newYd;
-
-        if (!getDistanceToTarget(newD, newInputData.xd, newInputData.yd, targetX, targetY)) 
+        if (!getDistanceToTarget(newD, newXd, newYd, targetX, targetY)) 
         {
             return false;
         }
@@ -697,12 +750,12 @@ bool getAmmoDropPoint(OutputData& outputData,
         }
 
         float ammoTimeOfFlight = 0.0f;
-        if (!getAmmoTimeOfFlight(ammoTimeOfFlight, newInputData, ammoInfo)) 
+        if (!getAmmoTimeOfFlight(ammoTimeOfFlight, inputData, ammoInfo)) 
         {
             return false;
         }
 
-        if (!getHorizontalFlightRange(newH, newInputData, ammoInfo, ammoTimeOfFlight)) 
+        if (!getHorizontalFlightRange(newH, inputData, ammoInfo, ammoTimeOfFlight)) 
         {
             return false;
         }
@@ -710,14 +763,14 @@ bool getAmmoDropPoint(OutputData& outputData,
 
     float ratio = (newD - newH) / newD;
 
-    outputData.fireX = newInputData.xd + (targetX - newInputData.xd) * ratio;
-    outputData.fireY = newInputData.yd + (targetY - newInputData.yd) * ratio;
+    outputData.fireX = newXd + (targetX - newXd) * ratio;
+    outputData.fireY = newYd + (targetY - newYd) * ratio;
 
     // LOG_SUCCESS("Successfully calculated ammo drop point.");
 
-    // LOG_INFO("📄 Result:");
-    // LOG_INFO("  - fireX: " << outputData.fireX);
-    // LOG_INFO("  - fireY: " << outputData.fireY);
+    LOG_INFO("📄 Result:");
+    LOG_INFO("  - fireX: " << outputData.fireX);
+    LOG_INFO("  - fireY: " << outputData.fireY);
 
     return true;
 }
@@ -770,12 +823,12 @@ bool interpolate(InterpolationResult& result,
 
     // LOG_SUCCESS("Successfully interpolated distance for target " << targetIndex);
 
-    // LOG_INFO("📄 Result:");
-    // LOG_INFO("  - x0: " << x0 << " -> " << "x1: " << x1);
-    // LOG_INFO("  - y0: " << y0 << " -> " << "y1: " << y1);
-    // LOG_INFO("  - New x for target: " << x);
-    // LOG_INFO("  - New y for target: " << y);
-    // LOG_INFO("  - Time interval between target snapshots: " << frac * 100 << "%");
+    LOG_INFO("📄 Result:");
+    LOG_INFO("  - x0: " << x0 << " -> " << "x1: " << x1);
+    LOG_INFO("  - y0: " << y0 << " -> " << "y1: " << y1);
+    LOG_INFO("  - New x for target: " << x);
+    LOG_INFO("  - New y for target: " << y);
+    LOG_INFO("  - Time interval between target snapshots: " << frac * 100 << "%");
 
     return true;
 }
@@ -839,9 +892,9 @@ bool getTargetVelocity(Vec2& result,
 
     // LOG_SUCCESS("Successfully calculated velocity for target " << targetIndex);
 
-    // LOG_INFO("📄 Result:");
-    // LOG_INFO("  - Velocity x: " << targetVx);
-    // LOG_INFO("  - Velocity y: " << targetVy);
+    LOG_INFO("📄 Result:");
+    LOG_INFO("  - Velocity x: " << targetVx);
+    LOG_INFO("  - Velocity y: " << targetVy);
 
     return true;
 }
@@ -865,11 +918,14 @@ bool getPredictedPosition(Vec2& result,
     float predictedX = targetX + targetVx * totalTime;
     float predictedY = targetY + targetVy * totalTime;
 
+    result.x = predictedX;
+    result.y = predictedY;
+
     // LOG_SUCCESS("Successfully calculated predicted position");
 
-    // LOG_INFO("📄 Result:");
-    // LOG_INFO("  - Predicted x: " << predictedX);
-    // LOG_INFO("  - Predicted y: " << predictedY);
+    LOG_INFO("📄 Result:");
+    LOG_INFO("  - Predicted x: " << predictedX);
+    LOG_INFO("  - Predicted y: " << predictedY);
 
     return true;
 }
@@ -890,10 +946,10 @@ bool getTimeToTarget(float& result,
 
     // LOG_SUCCESS("Successfully calculated time for distance");
 
-    // LOG_INFO("📄 Result:");
-    // LOG_INFO("  - Distance to point: " << distanceToTarget << "[m]");
-    // LOG_INFO("  - Speed: " << speed << "[m/s]");
-    // LOG_INFO("  - Time required: " << result << "[s]");
+    LOG_INFO("📄 Result:");
+    LOG_INFO("  - Distance to point: " << distanceToTarget << "[m]");
+    LOG_INFO("  - Speed: " << speed << "[m/s]");
+    LOG_INFO("  - Time required: " << result << "[s]");
 
     return true;
 }
@@ -926,8 +982,8 @@ bool getClosestTargetIndexByTime(size_t& result,
 
     // LOG_SUCCESS("Successfully found closest target by time to drop point");
 
-    // LOG_INFO("📄 Result:");
-    // LOG_INFO("  - Target with minimal time to drop point: " << result);
+    LOG_INFO("📄 Result:");
+    LOG_INFO("  - Target with minimal time to drop point: " << result);
 
     return true;
 }
@@ -955,7 +1011,7 @@ bool getDeltaAngle(float& result,
 
     // LOG_SUCCESS("Successfully calculated delta angle");
 
-    // LOG_INFO("📄 Result:");
+    LOG_INFO("📄 Result:");
     LOG_INFO("  - Angle difference: " << result << "[rad]");
 
     return true;
@@ -963,16 +1019,20 @@ bool getDeltaAngle(float& result,
 
 bool getAcceleration(float& result, const InputData& inputData)
 {
-    LOG_PROCESS("Calculating dron acceleration...");
+    // LOG_PROCESS("Calculating dron acceleration...");
 
-    float acceleration = (inputData.attackSpeed * inputData.attackSpeed) / (2.0f * inputData.accelerationPath);
-   
-    result = acceleration;
+    if (std::abs(inputData.accelerationPath) < 1e-6f)
+    {
+        LOG_ERROR("Invalid accelerationPath: cannot divide by zero");
+        return false;
+    }
+
+    result = (inputData.attackSpeed * inputData.attackSpeed) / (2.0f * inputData.accelerationPath);
 
     // LOG_SUCCESS("Successfully calculated acceleration");
 
-    // LOG_INFO("📄 Result:");
-    LOG_INFO("  - Dron acceleration: " << acceleration);
+    LOG_INFO("📄 Result:");
+    LOG_INFO("  - Dron acceleration: " << result);
 
     return true;
 }
@@ -1037,7 +1097,7 @@ int main()
     const size_t targets_number = 2; // TARGET_COUNT
 
     int count = 1;
-    while (count <= 50) // < SIM_MAX_STEPS
+    while (count <= 10) // < SIM_MAX_STEPS
     {
         LOG_INFO("------ FRAME " << count << " ------");
         LOG_INFO("Total simulation time elapsed: " << state.totalSimTime << "[s]");
@@ -1082,27 +1142,39 @@ int main()
             }
 
             float horizontalFlightRange = 0.0f;
-            if (!getHorizontalFlightRange(horizontalFlightRange, inputData, ammoInfo, ammoTimeOfFlight)) 
+            if (!getHorizontalFlightRange(horizontalFlightRange, 
+                inputData, 
+                ammoInfo, 
+                ammoTimeOfFlight)) 
             {
                 return 1;
             }
 
             float distanceToTarget = 0.0f;
-            if (!getDistanceToTarget(distanceToTarget, state.droneX, state.droneY, targetX, targetY)) 
+            if (!getDistanceToTarget(distanceToTarget, 
+                state.droneX, state.droneY, 
+                targetX, targetY)) 
             {
                 return 1;
             }
             targetDistances[i] = distanceToTarget;
 
             OutputData outputData{};
-            if (!getAmmoDropPoint(outputData, inputData, state.droneX, state.droneY, ammoInfo, distanceToTarget, horizontalFlightRange, targetX, targetY)) 
+            if (!getAmmoDropPoint(outputData, inputData, 
+                state.droneX, state.droneY, 
+                ammoInfo, 
+                distanceToTarget, 
+                horizontalFlightRange, 
+                targetX, targetY)) 
             {
                 return 1;
             }
             dropPoints[i] = {outputData.fireX, outputData.fireY};
 
             float distanceToDropPoint = 0.0f;
-            if (!getDistanceToTarget(distanceToDropPoint, state.droneX, state.droneY, outputData.fireX, outputData.fireY)) 
+            if (!getDistanceToTarget(distanceToDropPoint, 
+                state.droneX, state.droneY, 
+                outputData.fireX, outputData.fireY)) 
             {
                 return 1;
             }
@@ -1115,185 +1187,77 @@ int main()
             }
             timesToDropPoint[i] = timeToDropPoint;
 
+            float totalTime = timeToDropPoint + ammoTimeOfFlight;
+
             Vec2 targetVelocity = targetVelocities[i];
             Vec2 predictedPosition{};
             if (!getPredictedPosition(predictedPosition, 
                 targetVelocity.x, targetVelocity.y, 
                 targetX, targetY,
-                timeToDropPoint)) 
+                totalTime)) 
             {
                 return 1;
+            }
+            // predictedPositions[i] = predictedPosition;
+
+            // Тобто через totalTime відрізок часу ціль буде знаходитися в точці predictedPosition
+
+            float predictedX = targetX;
+            float predictedY = targetY;
+
+            for (size_t j = 0; j < 6; j++)
+            {
+                LOG_INFO("-----------: " << j);
+
+                float distanceToTarget_TEST = 0.0f;
+                if (!getDistanceToTarget(distanceToTarget_TEST, 
+                    state.droneX, state.droneY, 
+                    predictedX, predictedY)) 
+                {
+                    return 1;
+                }
+
+                OutputData outputData_TEST{};
+                if (!getAmmoDropPoint(outputData_TEST, inputData, 
+                    state.droneX, state.droneY, 
+                    ammoInfo, 
+                    distanceToTarget_TEST, 
+                    horizontalFlightRange, 
+                    predictedX, predictedY)) 
+                {
+                    return 1;
+                }
+ 
+                float distanceToDropPoint_TEST = 0.0f;
+                if (!getDistanceToTarget(distanceToDropPoint_TEST, 
+                    state.droneX, state.droneY, 
+                    outputData_TEST.fireX, outputData_TEST.fireY)) 
+                {
+                    return 1;
+                }
+
+                float timeToDropPoint_TEST = 0.0f;
+                if (!getTimeToTarget(timeToDropPoint_TEST, distanceToDropPoint_TEST, inputData.attackSpeed)) 
+                {
+                    return 1;
+                }
+
+                float totalTime_TEST = timeToDropPoint_TEST + ammoTimeOfFlight;
+
+                if (!getPredictedPosition(predictedPosition, 
+                    targetVelocity.x, targetVelocity.y, 
+                    predictedX, predictedY,
+                    totalTime_TEST)) 
+                {
+                    return 1;
+                }
+
+                predictedX = predictedPosition.x;
+                predictedY = predictedPosition.y;
             }
             predictedPositions[i] = predictedPosition;
         }
 
-        size_t closestTargetIndex = 0;
-        if (!getClosestTargetIndexByTime(closestTargetIndex, targets_number, timesToDropPoint)) 
-        {
-            return 1;
-        }
-
-        state.currentTargetIndex = closestTargetIndex;
-
-        LOG_INFO("");
-        LOG_INFO("  - Best target index: " << closestTargetIndex);
-        LOG_INFO("  - Time to drop point: " << timesToDropPoint[closestTargetIndex]);
-        LOG_INFO("  - Distance to CURRENT target: " << targetDistances[closestTargetIndex]);
-        float predictedDistance = 0;
-        if (!getDistanceToTarget(predictedDistance,
-            state.droneX, state.droneY,
-            dropPoints[state.currentTargetIndex].x,
-            dropPoints[state.currentTargetIndex].y))
-        {
-            return 1;
-        }
-        LOG_INFO("  - Distance to PREDICTED target: " << predictedDistance);        
-        LOG_INFO("");
-
-        float deltaAngle = 0;
-        if (!getDeltaAngle(deltaAngle, 
-            state.droneX, state.droneY, 
-            state.droneDir, 
-            dropPoints[state.currentTargetIndex].x,
-            dropPoints[state.currentTargetIndex].y)) 
-        {
-            return 1;
-        }
-
-        const float maxTrunStep = inputData.angularSpeed * inputData.simTimeStep; // 1 * 0.1
-        const float absAngle = std::fabs(deltaAngle); 
-        const bool hardTurn = absAngle > inputData.turnThreshold;
-
-        LOG_INFO("");
-        LOG_INFO("  - Drone velocity: " << state.droneVelocity);
-        LOG_INFO("");
-
-        switch (state.droneState)
-        {
-            case STOPPED:
-            {
-                LOG_INFO("Action STATE: STOPPED");
-
-                state.droneVelocity = 0.0f;
-                state.droneState = ACCELERATING;
-                break;
-            }
-            case MOVING:
-            {
-                LOG_INFO("Action STATE: MOVING");
-
-                if (hardTurn)
-                {
-                    state.droneState = DECELERATING;
-                    break;
-                }
-
-                float acceleration = 0;
-                getAcceleration(acceleration, inputData);
-
-                float stoppingDistance = (state.droneVelocity * state.droneVelocity) / 
-                                        (2.0f * acceleration);
-
-                if (dropDistances[state.currentTargetIndex] <= stoppingDistance)
-                {
-                    state.droneState = DECELERATING;
-                    break;
-                }
-
-                float dt = inputData.simTimeStep;
-
-                state.droneX += state.droneVelocity * std::cos(state.droneDir) * dt;
-                state.droneY += state.droneVelocity * std::sin(state.droneDir) * dt;
-                break;
-            }
-            case TURNING:
-            {
-                LOG_INFO("Action STATE: TURNING");
-
-                float appliedTurn = deltaAngle; 
-                if (appliedTurn > maxTrunStep) 
-                { 
-                    appliedTurn = maxTrunStep;
-                } 
-                else if (appliedTurn < -maxTrunStep)
-                { 
-                    appliedTurn = -maxTrunStep; 
-                }
-
-                state.droneDir += appliedTurn;
-
-                float newDeltaAngle = 0;
-                if (!getDeltaAngle(newDeltaAngle, 
-                    state.droneX, state.droneY, 
-                    state.droneDir, 
-                    dropPoints[state.currentTargetIndex].x,
-                    dropPoints[state.currentTargetIndex].y)) 
-                {
-                    return 1;
-                }
-
-                if (std::fabs(newDeltaAngle) <= 0.00005f)
-                {
-                    state.droneState = ACCELERATING;
-                }
-                break;
-            }
-            case ACCELERATING:
-            {
-                LOG_INFO("Action STATE: ACCELERATING");
-
-                if (hardTurn)
-                {
-                    state.droneState = DECELERATING;
-                    break;
-                }
-
-                float acceleration = 0;
-                if (!getAcceleration(acceleration, inputData)) 
-                {
-                    return 1;
-                }
-
-                float stoppingDistance = (state.droneVelocity * state.droneVelocity) / 
-                                        (2.0f * acceleration);
-
-                if (dropDistances[state.currentTargetIndex] <= stoppingDistance)
-                {
-                    state.droneState = DECELERATING;
-                    break;
-                }
-
-                state.droneVelocity += acceleration * inputData.simTimeStep;
-                if (state.droneVelocity >= inputData.attackSpeed)
-                {
-                    state.droneVelocity = inputData.attackSpeed;
-                    state.droneState = MOVING;
-                }
-                break;
-            }
-            case DECELERATING:
-            {
-                LOG_INFO("Action STATE: DECELERATING");
-
-                float acceleration = 0;
-                if (!getAcceleration(acceleration, inputData)) 
-                {
-                    return 1;
-                }
-
-                state.droneVelocity -= acceleration * inputData.simTimeStep;
-                if (state.droneVelocity <= 0.0f)
-                {
-                    state.droneVelocity = 0.0f;
-                    state.droneState = TURNING;
-                }
-                break;
-            }
-            default:
-            {
-                // ...
-            }
-        }
 
         state.totalSimTime = count * inputData.simTimeStep;
         count++;
@@ -1322,4 +1286,168 @@ int main()
         // { 
         //     LOG_INFO("Hard turn (STOP required)"); 
         //     state.droneState = DECELERATING;
+        // }
+
+
+
+
+
+        
+        // size_t closestTargetIndex = 0;
+        // if (!getClosestTargetIndexByTime(closestTargetIndex, targets_number, timesToDropPoint)) 
+        // {
+        //     return 1;
+        // }
+
+        // state.currentTargetIndex = closestTargetIndex;
+
+        // LOG_INFO("");
+        // LOG_INFO("  - Best target index: " << closestTargetIndex);
+        // LOG_INFO("  - Time to drop point: " << timesToDropPoint[closestTargetIndex]);
+        // LOG_INFO("  - Distance to CURRENT target: " << targetDistances[closestTargetIndex]); 
+        // LOG_INFO("");
+
+        // float deltaAngle = 0;
+        // if (!getDeltaAngle(deltaAngle, 
+        //     state.droneX, state.droneY, 
+        //     state.droneDir, 
+        //     dropPoints[state.currentTargetIndex].x,
+        //     dropPoints[state.currentTargetIndex].y)) 
+        // {
+        //     return 1;
+        // }
+
+        // const float maxTrunStep = inputData.angularSpeed * inputData.simTimeStep; // 1 * 0.1
+        // const float absAngle = std::fabs(deltaAngle); 
+        // const bool hardTurn = absAngle > inputData.turnThreshold;
+
+        // LOG_INFO("");
+        // LOG_INFO("  - Drone velocity: " << state.droneVelocity);
+        // LOG_INFO("");
+
+        // switch (state.droneState)
+        // {
+        //     case STOPPED:
+        //     {
+        //         LOG_INFO("Action STATE: STOPPED");
+
+        //         state.droneVelocity = 0.0f;
+        //         state.droneState = ACCELERATING;
+        //         break;
+        //     }
+        //     case MOVING:
+        //     {
+        //         LOG_INFO("Action STATE: MOVING");
+
+        //         if (hardTurn)
+        //         {
+        //             state.droneState = DECELERATING;
+        //             break;
+        //         }
+
+        //         float acceleration = 0;
+        //         getAcceleration(acceleration, inputData);
+
+        //         float stoppingDistance = (state.droneVelocity * state.droneVelocity) / 
+        //                                 (2.0f * acceleration);
+
+        //         if (dropDistances[state.currentTargetIndex] <= stoppingDistance)
+        //         {
+        //             state.droneState = DECELERATING;
+        //             break;
+        //         }
+
+        //         float dt = inputData.simTimeStep;
+
+        //         state.droneX += state.droneVelocity * std::cos(state.droneDir) * dt;
+        //         state.droneY += state.droneVelocity * std::sin(state.droneDir) * dt;
+        //         break;
+        //     }
+        //     case TURNING:
+        //     {
+        //         LOG_INFO("Action STATE: TURNING");
+
+        //         float appliedTurn = deltaAngle; 
+        //         if (appliedTurn > maxTrunStep) 
+        //         { 
+        //             appliedTurn = maxTrunStep;
+        //         } 
+        //         else if (appliedTurn < -maxTrunStep)
+        //         { 
+        //             appliedTurn = -maxTrunStep; 
+        //         }
+
+        //         state.droneDir += appliedTurn;
+
+        //         float newDeltaAngle = 0;
+        //         if (!getDeltaAngle(newDeltaAngle, 
+        //             state.droneX, state.droneY, 
+        //             state.droneDir, 
+        //             dropPoints[state.currentTargetIndex].x,
+        //             dropPoints[state.currentTargetIndex].y)) 
+        //         {
+        //             return 1;
+        //         }
+
+        //         if (std::fabs(newDeltaAngle) <= 0.00005f)
+        //         {
+        //             state.droneState = ACCELERATING;
+        //         }
+        //         break;
+        //     }
+        //     case ACCELERATING:
+        //     {
+        //         LOG_INFO("Action STATE: ACCELERATING");
+
+        //         if (hardTurn)
+        //         {
+        //             state.droneState = DECELERATING;
+        //             break;
+        //         }
+
+        //         float acceleration = 0;
+        //         if (!getAcceleration(acceleration, inputData)) 
+        //         {
+        //             return 1;
+        //         }
+
+        //         float stoppingDistance = (state.droneVelocity * state.droneVelocity) / 
+        //                                 (2.0f * acceleration);
+
+        //         if (dropDistances[state.currentTargetIndex] <= stoppingDistance)
+        //         {
+        //             state.droneState = DECELERATING;
+        //             break;
+        //         }
+
+        //         state.droneVelocity += acceleration * inputData.simTimeStep;
+        //         if (state.droneVelocity >= inputData.attackSpeed)
+        //         {
+        //             state.droneVelocity = inputData.attackSpeed;
+        //             state.droneState = MOVING;
+        //         }
+        //         break;
+        //     }
+        //     case DECELERATING:
+        //     {
+        //         LOG_INFO("Action STATE: DECELERATING");
+
+        //         float acceleration = 0;
+        //         if (!getAcceleration(acceleration, inputData)) 
+        //         {
+        //             return 1;
+        //         }
+
+        //         state.droneVelocity -= acceleration * inputData.simTimeStep;
+        //         if (state.droneVelocity <= 0.0f)
+        //         {
+        //             state.droneVelocity = 0.0f;
+        //             state.droneState = TURNING;
+        //         }
+        //         break;
+        //     }
+        //     default:
+        //     {
+        //         // ...
+        //     }
         // }
