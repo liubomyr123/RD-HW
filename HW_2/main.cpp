@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <cmath>
 #include <unordered_map>
+#include <limits>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -103,10 +104,10 @@ struct SimState {
     float droneDir;
     float droneVelocity = 0.0f;
 
-    // float targetDir;
+    float angleTurnLeft = 0.0f;
 
     DroneState droneState = STOPPED;
-    size_t currentTargetIndex = 0;
+    int currentTargetIndex = -1;
 };
 
 /**
@@ -162,10 +163,9 @@ struct TargetsData {
     float targetYInTime[TARGET_COUNT][TARGET_TIME_STEPS];
 };
 
-struct OutputData {
+struct AmmoDropPointData {
     float fireX;
     float fireY;
-    bool isRecalculated;
 };
 
 /**
@@ -702,11 +702,11 @@ bool getNewDroneCoordinatesForManeuver(float& newX,
     return true;
 }
 
-bool getAmmoDropPoint(OutputData& outputData, 
-    const InputData& inputData, 
+bool getAmmoDropPoint(AmmoDropPointData& result, 
+    // const InputData& inputData, 
     const float& droneX,
     const float& droneY,
-    const AmmoInfo& ammoInfo, 
+    // const AmmoInfo& ammoInfo, 
     const float& D, 
     const float& h, 
     const float& targetX, 
@@ -724,51 +724,50 @@ bool getAmmoDropPoint(OutputData& outputData,
         return false;
     }
 
-    float newXd = droneX;
-    float newYd = droneY;
-    float newH = h;
-    float newD = D;
+    // float newXd = droneX;
+    // float newYd = droneY;
+    // float newH = h;
+    // float newD = D;
 
-    if (isManeuverRequired(h, inputData.accelerationPath, D))
-    {
-        outputData.isRecalculated = true;
-        if (!getNewDroneCoordinatesForManeuver(newXd, newYd, inputData, D, h, targetX, targetY)) 
-        {
-            return false;
-        }
+    // if (isManeuverRequired(h, inputData.accelerationPath, D))
+    // {
+    //     if (!getNewDroneCoordinatesForManeuver(newXd, newYd, inputData, D, h, targetX, targetY)) 
+    //     {
+    //         return false;
+    //     }
 
-        if (!getDistanceToTarget(newD, newXd, newYd, targetX, targetY)) 
-        {
-            return false;
-        }
-        if (std::abs(newD) < 1e-6f)
-        {
-            LOG_ERROR("Invalid D: we cannot divide by zero");
-            return false;
-        }
+    //     if (!getDistanceToTarget(newD, newXd, newYd, targetX, targetY)) 
+    //     {
+    //         return false;
+    //     }
+    //     if (std::abs(newD) < 1e-6f)
+    //     {
+    //         LOG_ERROR("Invalid D: we cannot divide by zero");
+    //         return false;
+    //     }
 
-        float ammoTimeOfFlight = 0.0f;
-        if (!getAmmoTimeOfFlight(ammoTimeOfFlight, inputData, ammoInfo)) 
-        {
-            return false;
-        }
+    //     float ammoTimeOfFlight = 0.0f;
+    //     if (!getAmmoTimeOfFlight(ammoTimeOfFlight, inputData, ammoInfo)) 
+    //     {
+    //         return false;
+    //     }
 
-        if (!getHorizontalFlightRange(newH, inputData, ammoInfo, ammoTimeOfFlight)) 
-        {
-            return false;
-        }
-    }
+    //     if (!getHorizontalFlightRange(newH, inputData, ammoInfo, ammoTimeOfFlight)) 
+    //     {
+    //         return false;
+    //     }
+    // }
 
-    float ratio = (newD - newH) / newD;
+    float ratio = (D - h) / D;
 
-    outputData.fireX = newXd + (targetX - newXd) * ratio;
-    outputData.fireY = newYd + (targetY - newYd) * ratio;
+    result.fireX = droneX + (targetX - droneX) * ratio;
+    result.fireY = droneY + (targetY - droneY) * ratio;
 
     // LOG_SUCCESS("Successfully calculated ammo drop point.");
 
     LOG_INFO("📄 Result:");
-    LOG_INFO("  - fireX: " << outputData.fireX);
-    LOG_INFO("  - fireY: " << outputData.fireY);
+    LOG_INFO("  - fireX: " << result.fireX);
+    LOG_INFO("  - fireY: " << result.fireY);
 
     return true;
 }
@@ -852,11 +851,11 @@ bool getTargetVelocity(Vec2& result,
      */
 
     float t = state.totalSimTime;
-    float dt = inputData.simTimeStep;
+    float dt = inputData.arrayTimeStep;
 
     if (std::abs(dt) < 1e-6f)
     {
-        LOG_ERROR("Invalid simTimeStep: we cannot divide by zero");
+        LOG_ERROR("Invalid arrayTimeStep: we cannot divide by zero");
         return false;
     }
 
@@ -1115,7 +1114,7 @@ int main()
     state.droneDir = inputData.initialDir;
     state.droneState = STOPPED;
 
-    const size_t targets_number = 2; // TARGET_COUNT
+    const size_t targets_number = 1; // TARGET_COUNT
 
     int count = 1;
     while (count <= 3) // < SIM_MAX_STEPS
@@ -1136,13 +1135,16 @@ int main()
         }
 
         // Шукаємо найкращу ціль на даний момент
-        // Ітераційно пройтися і:
+        // Ітераційно пройтися та:
         // 1) розрахувати для кожної цілі точку скиду
         // 2) розрахувати час який треба дрону щоб долетіти до точки скиду + час польоту снаряду
         // 3) розрахувати саму позицію цілі
         // 4) вибрати ту ціль до якої треба найменше часу летіти
+        float smallestTime = std::numeric_limits<float>::max();
+        int bestTarget = -1;
         for (size_t target_iterator = 0; target_iterator < targets_number; target_iterator++) 
         {
+            LOG_INFO("-----------: target # " << target_iterator);
             float predictedTargetX = 0.0f;
             float predictedTargetY = 0.0f;
 
@@ -1155,45 +1157,128 @@ int main()
 
             for (size_t j = 0; j < 6; j++)
             {
-                // 1) Треба знайти точку скиду
-                // 2) Скільки часу дрон буде до неї летіти
-                // 3) Час польоту снаряду ми уже маємо
-                // 4) І знаючи цей час можемо знайти де буде ціль через цей час
-                // 5) Оновити прогнозоване місце цілі і повторити ітерацію
-                // 6) В кінці ми отримаємо для цієї цілі (target_iterator) місце цілі та точку скиду
+                LOG_INFO("-----------: prediction # " << j);
+
+                // ✅ 1) Треба знайти точку скиду 
+                // ✅ 2) Скільки часу дрон буде до неї летіти 
+                // ✅ 3) Час польоту снаряду ми уже маємо - ammoTimeOfFlight 
+                // ✅ 4) І знаючи час долітання до точки скиду та політ снаряду можемо знайти 
+                //                      де буде ціль від поточного моменту через цей час
+                // ✅ 5) Оновити прогнозоване місце цілі і повторити ітерацію
+                // ✅ 6) В кінці ми отримаємо для цієї цілі нове місце цілі та точку скиду
+
+                float distanceToTarget = 0.0f;
+                if (!getDistanceToTarget(distanceToTarget, 
+                    state.droneX, state.droneY, 
+                    predictedTargetX, predictedTargetY)) 
+                {
+                    return 1;
+                }
+
+                AmmoDropPointData ammoDropPoint{};
+                if (!getAmmoDropPoint(ammoDropPoint,
+                    state.droneX, state.droneY, 
+                    distanceToTarget, 
+                    horizontalFlightRange, 
+                    predictedTargetX, predictedTargetY)) 
+                {
+                    return 1;
+                }
+                predictedDropPointX = ammoDropPoint.fireX;
+                predictedDropPointY = ammoDropPoint.fireY;
+
+                float distanceToDropPoint = 0.0f;
+                if (!getDistanceToTarget(distanceToDropPoint, 
+                    state.droneX, state.droneY, 
+                    ammoDropPoint.fireX, ammoDropPoint.fireY)) 
+                {
+                    return 1;
+                }
+
+                float timeToDropPoint = 0.0f;
+                if (!getTimeToTarget(timeToDropPoint, distanceToDropPoint, inputData.attackSpeed)) 
+                {
+                    return 1;
+                }
+
+                float totalTime = timeToDropPoint + ammoTimeOfFlight;
+
+                Vec2 targetVelocity{};
+                if (!getTargetVelocity(targetVelocity, target_iterator, state, inputData, targetsData))
+                {
+                    return 1;
+                }
+                Vec2 predictedPosition{};
+                if (!getPredictedPosition(predictedPosition, 
+                    targetVelocity.x, targetVelocity.y, 
+                    predictedTargetX, predictedTargetY,
+                    totalTime)) 
+                {
+                    return 1;
+                }
+
+                predictedTargetX = predictedPosition.x;
+                predictedTargetY = predictedPosition.y;
             }
-            
-        }
-
-        Vec2 predictedPositions[targets_number]{};
-        for (size_t i = 0; i < targets_number; i++) 
-        {
-            float targetX = interpolateResults[i].resultX;
-            float targetY = interpolateResults[i].resultY;
-
-            float distanceToTarget = 0.0f;
-            if (!getDistanceToTarget(distanceToTarget, 
-                state.droneX, state.droneY, 
-                targetX, targetY)) 
+        
+            // Далі треба знайти timeToStop, тобто додатковий час необхідний якщо ми хочемо змінити ціль
+            // Будемо рахувати штрафний час до зупинки
+            float timeToStop = 0.0f;
+            switch (state.droneState)
             {
-                return 1;
-            }
-
-            OutputData outputData{};
-            if (!getAmmoDropPoint(outputData, inputData, 
-                state.droneX, state.droneY, 
-                ammoInfo, 
-                distanceToTarget, 
-                horizontalFlightRange, 
-                targetX, targetY)) 
-            {
-                return 1;
+                case STOPPED:
+                    // Ми уже стоїмо і нам не треба додаткового часу
+                    break;
+                case ACCELERATING:
+                    // Швидкість дрона >=0, тому нам треба врахувати скільки часу
+                    // дрон уже розганяється, як штрафний час необхідний щоб зупинитися
+                    // 
+                    // Наприклад:
+                    //      - поточна швидкість = 8 м/с
+                    //      - прискорення - 5 м/с
+                    // 
+                    // Тоді час який дрон уже затратив на досягнення швидкості 8 м/с буде:
+                    // 5 м/с - 1 с
+                    // 8 м/с - х с
+                    // х = (8 м/с) / (5 м/с) = 1.6 c
+                    timeToStop = state.droneVelocity / acceleration;
+                    break;
+                case MOVING:
+                    // Дрон уже рухається зі стабільною макс швидкістю, отже треба врахувати
+                    // час на гальмування = attackSpeed / acceleration, ми беремо 
+                    // attackSpeed бо ми уже на цій стабільній швидкості
+                    timeToStop = inputData.attackSpeed / acceleration;
+                    break;
+                case TURNING:
+                    // Дрон зараз розвертається, і він все ще в процесі
+                    // Не важливо чи він почав, чи ще в процесі, залишається ще певний кут 
+                    // який йому залишилося розвернутися до попередньої активної цілі
+                    // Отже, нам треба знати скільки по часу ще залишилося йому розвертатися і зупинитися
+                    // 
+                    // Наприклад, нехай залишилося ще розвернути 1.2 радіани
+                    // І маємо максимальну швидкість повороту - angularSpeed рад/с, нехай 1 рад/с
+                    // Тоді час необхідний щоб довернути решту 1.2 радіанів буде:
+                    // 1 рад    - 1 с
+                    // 1.2 рад  - х с
+                    // х = (1.2 рад) / (1 рад) = 1.2 с
+                    timeToStop = state.angleTurnLeft / inputData.angularSpeed;
+                    break;
+                case DECELERATING:
+                    // Час необхідний щоб повністю зупинитися, тобто скільки ще часу він буде тормозити
+                    // Ми маємо його поточну швидкість, яка падає
+                    // І можемо знайти скільки ще часу він буде сповільнюватися до 0
+                    // За умовою, швидкість прискорення та гальмування є однаковим
+                    // Тому робимо так само як і в ACCELERATING
+                    timeToStop = state.droneVelocity / acceleration;
+                    break;
+                default:
+                    break;
             }
 
             float distanceToDropPoint = 0.0f;
             if (!getDistanceToTarget(distanceToDropPoint, 
                 state.droneX, state.droneY, 
-                outputData.fireX, outputData.fireY)) 
+                predictedDropPointX, predictedDropPointY)) 
             {
                 return 1;
             }
@@ -1204,81 +1289,71 @@ int main()
                 return 1;
             }
 
-            Vec2 targetVelocity{};
-            if (!getTargetVelocity(targetVelocity, i, state, inputData, targetsData))
+            float totalTime = 0.0f;
+
+            float distanceToTarget = 0.0f;
+            if (!getDistanceToTarget(distanceToTarget, 
+                state.droneX, state.droneY, 
+                predictedTargetX, predictedTargetY)) 
             {
                 return 1;
             }
 
-            float totalTime = timeToDropPoint + ammoTimeOfFlight;
-
-            Vec2 predictedPosition{};
-            if (!getPredictedPosition(predictedPosition, 
-                targetVelocity.x, targetVelocity.y, 
-                targetX, targetY,
-                totalTime)) 
+            if (distanceToTarget > horizontalFlightRange)
             {
-                return 1;
+                // Все добре, дрон є на достатній відстані від цілі щоб попасти снарядом
+                totalTime = timeToDropPoint + ammoTimeOfFlight;
             }
-            // predictedPositions[i] = predictedPosition;
-
-            // Тобто через totalTime відрізок часу ціль буде знаходитися в точці predictedPosition
-
-            float predictedX = targetX;
-            float predictedY = targetY;
-
-            for (size_t j = 0; j < 6; j++)
+            else
             {
-                LOG_INFO("-----------: " << j);
+                // Дрон перетнув межу horizontalFlightRange, треба врахувати час на маневр
+                // Тому треба знайти скільки часу займе дрону на маневр: 
+                //      - тобто пролетіти якусь додаткову дистанцію щоб мати можливість скинути
+                //      - і можливо треба буде розвернутися до цілі, беремо найгірший випадок - розворот на 180 градусів
+                // Нехай відстань від дрона до цілі - 5 метрів, а дистанція на скид - 7 метрів
+                // Це означає, що дрон уже як 2 метри пропустив точку скиду
+                // Тому йому треба відлетіти на ще на 5 метрів і ще як мінімум на 7 метрів, потім ще й розвернутися
+                // 
+                // 1 радіан = (180 градусів / M_PI)
+                // 
+                // Нехай у нас angularSpeed = 3 рад/с, тобто за 1 секунду ми повертаємось на 3 радіани або 3 * (180 градусів / M_PI)
+                // Тоді щоб знайти час скільки дрон буде розвертатися на 180 градусів:
+                // 
+                // 1 сек - 3 * (180 градусів / M_PI)
+                // х сек - 180 градусів
+                // 
+                // x сек = (180 градусів * 1 сек) / (3 * (180 градусів / M_PI))
+                // x сек = ((180 градусів * 1 сек) / 1) * (M_PI / (3 * 180 градусів)) | скорочуємо на 180 градусів
+                // x сек = ((1 сек) / 1) * (M_PI / (3))
+                // x сек = M_PI / 3
+                // Тобто час розвороту на 180 градусів - це M_PI / inputData.angularSpeed
+                float timeOfFullTurn = (float)M_PI / inputData.angularSpeed;
+                
+                float restoreDistance = distanceToTarget + horizontalFlightRange;
 
-                float distanceToTarget_TEST = 0.0f;
-                if (!getDistanceToTarget(distanceToTarget_TEST, 
-                    state.droneX, state.droneY, 
-                    predictedX, predictedY)) 
+                float restoreTime = 0.0f;
+                if (!getTimeToTarget(restoreTime, restoreDistance, inputData.attackSpeed)) 
                 {
                     return 1;
                 }
 
-                OutputData outputData_TEST{};
-                if (!getAmmoDropPoint(outputData_TEST, inputData, 
-                    state.droneX, state.droneY, 
-                    ammoInfo, 
-                    distanceToTarget_TEST, 
-                    horizontalFlightRange, 
-                    predictedX, predictedY)) 
-                {
-                    return 1;
-                }
- 
-                float distanceToDropPoint_TEST = 0.0f;
-                if (!getDistanceToTarget(distanceToDropPoint_TEST, 
-                    state.droneX, state.droneY, 
-                    outputData_TEST.fireX, outputData_TEST.fireY)) 
-                {
-                    return 1;
-                }
-
-                float timeToDropPoint_TEST = 0.0f;
-                if (!getTimeToTarget(timeToDropPoint_TEST, distanceToDropPoint_TEST, inputData.attackSpeed)) 
-                {
-                    return 1;
-                }
-
-                float totalTime_TEST = timeToDropPoint_TEST + ammoTimeOfFlight;
-
-                if (!getPredictedPosition(predictedPosition, 
-                    targetVelocity.x, targetVelocity.y, 
-                    predictedX, predictedY,
-                    totalTime_TEST)) 
-                {
-                    return 1;
-                }
-
-                predictedX = predictedPosition.x;
-                predictedY = predictedPosition.y;
+                totalTime = restoreTime + timeOfFullTurn + ammoTimeOfFlight;
             }
-            predictedPositions[i] = predictedPosition;
+
+            // Якщо це якась інша ціль, не та до якої ми зараз летимо, будемо враховувати штраф не зміну цілі
+            if (state.currentTargetIndex != -1 && target_iterator != state.currentTargetIndex)
+            {
+                totalTime += timeToStop;
+            }
+
+            if (totalTime < smallestTime)
+            {
+                smallestTime = totalTime;
+                bestTarget = target_iterator;
+            }
         }
+        LOG_INFO("Best target -> " << bestTarget);
+        state.currentTargetIndex = bestTarget;
 
         state.totalSimTime = count * inputData.simTimeStep;
         count++;
