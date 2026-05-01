@@ -455,7 +455,7 @@ int main()
         float dx = fireX - droneX;
         float dy = fireY - droneY;
 
-        // І знаходимо кут між на який дрон має повернутися щоб дивитися на точку скиду
+        // І знаходимо кут на який дрон має повернутися щоб дивитися на точку скиду
         float desiredDir = std::atan2(dy, dx);
         // direction - куди зараз дивимться дрон, desiredDir - куди має дивитися, на точку скиду
         // deltaAngle - показує наскільки треба повернутися щоб почати дивитися в точку скиду
@@ -501,14 +501,24 @@ int main()
         {
             case STOPPED:
             {
+                // turnThreshold - це значення в радіанах яке показує максимальне значення
+                // після якого нам треба буде зупинитися і розвертатися
+                // Наприклад 0.3, це означає що якщо кут між дроном та ціллю є більший за 0.3, нам треба
+                // зупинити дрон, розвернутися і тоді летіти до точки скиду
+                // якщо менше за 0.3, ми будемо розвертатися поступово в русі
+                // Але так як ми уже стоїмо, ми просто мамо тепер розвертатися
                 if (std::fabs(deltaAngle) > turnThreshold)
                 {
                     state = TURNING;
+                    // тут в turnRemaining ми шукаємо скільки секунд потрібно щоб повернутись на deltaAngle
                     turnRemaining = std::fabs(deltaAngle) / angularSpeed;
+                    // і оновлюємо напрямок куди маємо летіти
                     targetDir = desiredDir;
                 }
                 else
                 {
+                    // В цьому випадку, якщо кут є меншим за turnThreshold, ми починаємо прискорення
+                    // просто поступово змінюючи напрямок і поступово повертаємо в напрямку точки скиду
                     direction = desiredDir;
                     state = ACCELERATING;
                 }
@@ -516,23 +526,38 @@ int main()
             }
             case ACCELERATING:
             {
+                // якщо кут великий + speed < 0.01, тоді ми розганяємось і на 
+                // наступному кроці можемо потрапити в випадок:
+                // кут великий + speed > 0.01 і тоді перейдемо в DECELERATING
+                // тобто ми хочемо зупинятися тільки тоді коли ми реально рухаємося
+                // і + коли кут до точки скиду завеликий
                 if (std::fabs(deltaAngle) > turnThreshold && speed > 0.01f)
                 {
                     state = DECELERATING;
                 }
                 else
                 {
+                    // У випадку якщо кут все ще завеликий, але ми маєже не рухаємося
+                    // або кут вже більший turnThreshold
+                    // ми поченаємо збільшувати швидкість
                     speed += acceleration * simTimeStep;
+
+                    // і як тільки набираємо макс швидкість - переходимо в стан стабільного руху вперед
                     if (speed >= attackSpeed)
                     {
                         speed = attackSpeed;
                         state = MOVING;
                     }
+                    // якщо кут все ще завеликий, ми не міняємо напрямку
+                    // але якщо кут ще в межаї turnThreshold, то ми поступово змінюємо напрямок дрона
                     if (std::fabs(deltaAngle) <= turnThreshold)
                     {
                         direction = desiredDir;
                     }
 
+                    // std::cos(direction) та std::sin(direction) - це перетворення в одиничний вектор
+                    // speed * simTimeStep - це яку відстань дрон долає за час simTimeStep зі швидкістю speed
+                    // таким чином ми переміщуємо координати дрона на відстань (speed * simTimeStep) по вектору sin/cos(direction)
                     droneX += std::cos(direction) * speed * simTimeStep;
                     droneY += std::sin(direction) * speed * simTimeStep;
                 }
@@ -546,17 +571,29 @@ int main()
                     speed = 0.0f;
                     state = STOPPED;
                 }
+                // тут ми продовжуємо рух вперед але уже з меншою швидкістю, таким чином сповілюнюючи дрон 
                 droneX += std::cos(direction) * speed * simTimeStep;
                 droneY += std::sin(direction) * speed * simTimeStep;
                 break;
             }
             case TURNING:
             {
-                float turnStep = angularSpeed * simTimeStep
-                    * (normalizeAngle(targetDir - direction) >= 0 ? 1.0f : -1.0f);
+                // Тут ми намагаємося знайти наскільки максимум дрон здатний розвернутися за один фрейм симуляції
+                // маємо angularSpeed - це макс швидкість повертання дрона  рад/с
+                // simTimeStep - часовий крок симуляції                     с
+                // angularSpeed * simTimeStep - дає нам скільки радіан може повернути дрон за фрейм симуляції
+                // і потім ми маємо визначити в яку сторону оберататися, якщо різниця між напрямком дрона
+                // та напрямком цілі більше 0, тоді ми крутимося проти год стрілки
+                float turnStep = angularSpeed * simTimeStep * (normalizeAngle(targetDir - direction) >= 0 ? 1.0f : -1.0f);
+
+                // розраховуємо новий напрямок, ми беремо поточний напрямок і 
+                // розвертаємо на наш крок
                 direction = normalizeAngle(direction + turnStep);
+                // і тепер нам залишилося трохи менше часу на розвертання, а саме на часовий крок симуляції
                 turnRemaining -= simTimeStep;
                 
+                // далі якщо час який треба було для розвороту закінчився
+                // оновлюємо точний напрямок на ціль, бо попереднє оновлення може мати неточності
                 if (turnRemaining <= 0.0f)
                 {
                     direction = targetDir;
@@ -567,17 +604,23 @@ int main()
             }  
             case MOVING:
             {
+                // перевіряємо чи в процесі стабільного польоту і нас є завелике відхилення
+                // якщо є, значить нам час зупинятися щоб зробити повний поворот до цілі
                 if (std::fabs(deltaAngle) > turnThreshold)
                 {
                     state = DECELERATING;
                 }
+                // в іншому випадку, ми продовжуємо рух і поступово зміщуємося в сторону в напрямку цілі
                 else
                 {
+                    // якщо кут між дроном та ціллю в межах turnThreshold
+                    // ми просто вирівнюємо напрямок рівно на точку скиду, щоб не було похибок
                     if (std::fabs(deltaAngle) <= turnThreshold)
                     {
                         direction = desiredDir;
                     }
 
+                    // продовжуємо рух до цілі зі стабільною швидкістю
                     droneX += std::cos(direction) * speed * simTimeStep;
                     droneY += std::sin(direction) * speed * simTimeStep;
                 }

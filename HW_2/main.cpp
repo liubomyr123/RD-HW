@@ -1,18 +1,23 @@
 #include <iostream>
 #include <fstream>
 #include <sstream>
-
+// #include <locale>
 #include <string>
 #include <cstdint>
 #include <cmath>
 #include <unordered_map>
+
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 class Logger {
 private:
     std::ofstream file;
 
     Logger() {
-        file.open("app.log", std::ios::trunc);
+        file.open("app.log", std::ios::out | std::ios::trunc);
+        // file.imbue(std::locale("")); // <- важливо
     }
 
 public:
@@ -54,7 +59,7 @@ public:
     do { \
         std::ostringstream oss; \
         oss << x; \
-        Logger::instance().log("⚠️", oss.str()); \
+        Logger::instance().log("⚠️ ", oss.str()); \
     } while(0)
 
 #define LOG_SUCCESS(x) \
@@ -63,12 +68,6 @@ public:
         oss << x; \
         Logger::instance().log("✅", oss.str()); \
     } while(0)
-
-// #define LOG_INFO(x)     std::cout << x << "\n"
-// #define LOG_PROCESS(x)  std::cout << "🔄 " << x << "\n"
-// #define LOG_ERROR(x)    std::cerr << "❌ " << x << "\n"
-// #define LOG_WARN(x)     std::cout << "⚠️  " << x << "\n"
-// #define LOG_SUCCESS(x)  std::cout << "✅ " << x << "\n"
 
 #define GRAVITATIONAL_ACCELERATION 9.81f
 #define TARGET_COUNT 5
@@ -93,7 +92,6 @@ enum DroneState
     TURNING,
     MOVING,
 };
-
 
 struct SimState {
     float totalSimTime = 0.0f;
@@ -1063,6 +1061,11 @@ bool getAcceleration(float& result, const InputData& inputData)
 
 int main()
 {
+#ifdef _WIN32
+    SetConsoleOutputCP(CP_UTF8);
+    SetConsoleCP(CP_UTF8);
+#endif
+
     std::string input_file_name = "input.txt";
     std::string output_file_name = "simulation.txt";
     std::string targets_file_name = "targets.txt";
@@ -1087,6 +1090,24 @@ int main()
         return 1;
     }
 
+    float ammoTimeOfFlight = 0.0f;
+    if (!getAmmoTimeOfFlight(ammoTimeOfFlight, inputData, ammoInfo)) 
+    {
+        return 1;
+    }
+
+    float horizontalFlightRange = 0.0f;
+    if (!getHorizontalFlightRange(horizontalFlightRange, inputData, ammoInfo, ammoTimeOfFlight)) 
+    {
+        return 1;
+    }
+
+    float acceleration = 0.0f;
+    if (!getAcceleration(acceleration, inputData)) 
+    {
+        return 1;
+    }
+
     state.droneX = inputData.xd;
     state.droneY = inputData.yd;
     state.droneZ = inputData.zd;
@@ -1097,11 +1118,12 @@ int main()
     const size_t targets_number = 2; // TARGET_COUNT
 
     int count = 1;
-    while (count <= 10) // < SIM_MAX_STEPS
+    while (count <= 3) // < SIM_MAX_STEPS
     {
         LOG_INFO("------ FRAME " << count << " ------");
         LOG_INFO("Total simulation time elapsed: " << state.totalSimTime << "[s]");
 
+        // Знайшли координати цілей на даний момент
         InterpolationResult interpolateResults[targets_number]{};
         for (size_t i = 0; i < targets_number; i++)
         {
@@ -1113,42 +1135,41 @@ int main()
             interpolateResults[i] = result;
         }
 
-        Vec2 targetVelocities[targets_number];
-        for (size_t i = 0; i < targets_number; i++)
+        // Шукаємо найкращу ціль на даний момент
+        // Ітераційно пройтися і:
+        // 1) розрахувати для кожної цілі точку скиду
+        // 2) розрахувати час який треба дрону щоб долетіти до точки скиду + час польоту снаряду
+        // 3) розрахувати саму позицію цілі
+        // 4) вибрати ту ціль до якої треба найменше часу летіти
+        for (size_t target_iterator = 0; target_iterator < targets_number; target_iterator++) 
         {
-            Vec2 targetVelocity{};
-            if (!getTargetVelocity(targetVelocity, i, state, inputData, targetsData))
+            float predictedTargetX = 0.0f;
+            float predictedTargetY = 0.0f;
+
+            float predictedDropPointX = 0.0f;
+            float predictedDropPointY = 0.0f;
+
+            // Нехай перше припущення цілі - там де ціль зараз стоїть
+            predictedTargetX = interpolateResults[target_iterator].resultX;
+            predictedTargetY = interpolateResults[target_iterator].resultY;
+
+            for (size_t j = 0; j < 6; j++)
             {
-                return 1;
+                // 1) Треба знайти точку скиду
+                // 2) Скільки часу дрон буде до неї летіти
+                // 3) Час польоту снаряду ми уже маємо
+                // 4) І знаючи цей час можемо знайти де буде ціль через цей час
+                // 5) Оновити прогнозоване місце цілі і повторити ітерацію
+                // 6) В кінці ми отримаємо для цієї цілі (target_iterator) місце цілі та точку скиду
             }
-            targetVelocities[i] = targetVelocity;
+            
         }
 
-        float targetDistances[targets_number];
         Vec2 predictedPositions[targets_number]{};
-        float timesToDropPoint[targets_number]{};
-        float dropDistances[targets_number];
-        Vec2 dropPoints[targets_number];
-
         for (size_t i = 0; i < targets_number; i++) 
         {
             float targetX = interpolateResults[i].resultX;
             float targetY = interpolateResults[i].resultY;
-
-            float ammoTimeOfFlight = 0.0f;
-            if (!getAmmoTimeOfFlight(ammoTimeOfFlight, inputData, ammoInfo)) 
-            {
-                return 1;
-            }
-
-            float horizontalFlightRange = 0.0f;
-            if (!getHorizontalFlightRange(horizontalFlightRange, 
-                inputData, 
-                ammoInfo, 
-                ammoTimeOfFlight)) 
-            {
-                return 1;
-            }
 
             float distanceToTarget = 0.0f;
             if (!getDistanceToTarget(distanceToTarget, 
@@ -1157,7 +1178,6 @@ int main()
             {
                 return 1;
             }
-            targetDistances[i] = distanceToTarget;
 
             OutputData outputData{};
             if (!getAmmoDropPoint(outputData, inputData, 
@@ -1169,7 +1189,6 @@ int main()
             {
                 return 1;
             }
-            dropPoints[i] = {outputData.fireX, outputData.fireY};
 
             float distanceToDropPoint = 0.0f;
             if (!getDistanceToTarget(distanceToDropPoint, 
@@ -1178,18 +1197,21 @@ int main()
             {
                 return 1;
             }
-            dropDistances[i] = distanceToDropPoint;
 
             float timeToDropPoint = 0.0f;
             if (!getTimeToTarget(timeToDropPoint, distanceToDropPoint, inputData.attackSpeed)) 
             {
                 return 1;
             }
-            timesToDropPoint[i] = timeToDropPoint;
+
+            Vec2 targetVelocity{};
+            if (!getTargetVelocity(targetVelocity, i, state, inputData, targetsData))
+            {
+                return 1;
+            }
 
             float totalTime = timeToDropPoint + ammoTimeOfFlight;
 
-            Vec2 targetVelocity = targetVelocities[i];
             Vec2 predictedPosition{};
             if (!getPredictedPosition(predictedPosition, 
                 targetVelocity.x, targetVelocity.y, 
@@ -1257,7 +1279,6 @@ int main()
             }
             predictedPositions[i] = predictedPosition;
         }
-
 
         state.totalSimTime = count * inputData.simTimeStep;
         count++;
@@ -1345,9 +1366,6 @@ int main()
         //             break;
         //         }
 
-        //         float acceleration = 0;
-        //         getAcceleration(acceleration, inputData);
-
         //         float stoppingDistance = (state.droneVelocity * state.droneVelocity) / 
         //                                 (2.0f * acceleration);
 
@@ -1389,7 +1407,7 @@ int main()
         //             return 1;
         //         }
 
-        //         if (std::fabs(newDeltaAngle) <= 0.00005f)
+        //         if (std::fabs(newDeltaAngle) <= 0.00005f) // turnThreshold 
         //         {
         //             state.droneState = ACCELERATING;
         //         }
@@ -1403,12 +1421,6 @@ int main()
         //         {
         //             state.droneState = DECELERATING;
         //             break;
-        //         }
-
-        //         float acceleration = 0;
-        //         if (!getAcceleration(acceleration, inputData)) 
-        //         {
-        //             return 1;
         //         }
 
         //         float stoppingDistance = (state.droneVelocity * state.droneVelocity) / 
@@ -1431,12 +1443,6 @@ int main()
         //     case DECELERATING:
         //     {
         //         LOG_INFO("Action STATE: DECELERATING");
-
-        //         float acceleration = 0;
-        //         if (!getAcceleration(acceleration, inputData)) 
-        //         {
-        //             return 1;
-        //         }
 
         //         state.droneVelocity -= acceleration * inputData.simTimeStep;
         //         if (state.droneVelocity <= 0.0f)
