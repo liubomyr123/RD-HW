@@ -636,11 +636,11 @@ bool getDistanceToTarget(float& result,
     // targetX, targetY - координати цілі
     // xd, yd - координати дрона
 
-    float xDiff = targetX - droneX;
-    float yDiff = targetY - droneY;
+    float deltaX = targetX - droneX;
+    float deltaY = targetY - droneY;
 
-    float step0 = xDiff * xDiff;
-    float step1 = yDiff * yDiff;
+    float step0 = deltaX * deltaX;
+    float step1 = deltaY * deltaY;
 
     float D = std::sqrt(step0 + step1);
 
@@ -1014,6 +1014,13 @@ bool getDeltaAngle(float& result,
     return true;
 }
 
+float normalizeAngle(float a)
+{
+    while (a > M_PI) a -= 2.0f * (float)M_PI;
+    while (a < -M_PI) a += 2.0f * (float)M_PI;
+    return a;
+}
+
 bool getAcceleration(float& result, const InputData& inputData)
 {
     // LOG_PROCESS("Calculating dron acceleration...");
@@ -1142,9 +1149,14 @@ int main()
         // 4) вибрати ту ціль до якої треба найменше часу летіти
         float smallestTime = std::numeric_limits<float>::max();
         int bestTarget = -1;
+        float bestTargetX = 0.0f;
+        float bestTargetY = 0.0f;
+        float bestDropPointX = 0.0f;
+        float bestDropPointY = 0.0f;
         for (size_t target_iterator = 0; target_iterator < targets_number; target_iterator++) 
         {
             LOG_INFO("-----------: target # " << target_iterator);
+
             float predictedTargetX = 0.0f;
             float predictedTargetY = 0.0f;
 
@@ -1299,7 +1311,7 @@ int main()
                 return 1;
             }
 
-            if (distanceToTarget > horizontalFlightRange)
+            if (distanceToTarget >= horizontalFlightRange)
             {
                 // Все добре, дрон є на достатній відстані від цілі щоб попасти снарядом
                 totalTime = timeToDropPoint + ammoTimeOfFlight;
@@ -1310,6 +1322,7 @@ int main()
                 // Тому треба знайти скільки часу займе дрону на маневр: 
                 //      - тобто пролетіти якусь додаткову дистанцію щоб мати можливість скинути
                 //      - і можливо треба буде розвернутися до цілі, беремо найгірший випадок - розворот на 180 градусів
+                // 
                 // Нехай відстань від дрона до цілі - 5 метрів, а дистанція на скид - 7 метрів
                 // Це означає, що дрон уже як 2 метри пропустив точку скиду
                 // Тому йому треба відлетіти на ще на 5 метрів і ще як мінімум на 7 метрів, потім ще й розвернутися
@@ -1340,7 +1353,7 @@ int main()
                 totalTime = restoreTime + timeOfFullTurn + ammoTimeOfFlight;
             }
 
-            // Якщо це якась інша ціль, не та до якої ми зараз летимо, будемо враховувати штраф не зміну цілі
+            // Якщо це якась інша ціль, не та до якої ми зараз летимо, будемо враховувати штраф на зміну цілі
             if (state.currentTargetIndex != -1 && target_iterator != state.currentTargetIndex)
             {
                 totalTime += timeToStop;
@@ -1350,10 +1363,96 @@ int main()
             {
                 smallestTime = totalTime;
                 bestTarget = target_iterator;
+                bestTargetX = predictedTargetX;
+                bestTargetY = predictedTargetY;
+                bestDropPointX = predictedDropPointX;
+                bestDropPointY = predictedDropPointY;
             }
         }
         LOG_INFO("Best target -> " << bestTarget);
         state.currentTargetIndex = bestTarget;
+
+        LOG_INFO("bestTargetX -> " << bestTargetX);
+        LOG_INFO("bestTargetY -> " << bestTargetY);
+
+        float bestDistanceToTarget = 0.0f;
+        if (!getDistanceToTarget(bestDistanceToTarget, 
+            state.droneX, state.droneY, 
+            bestTargetX, bestTargetY)) 
+        {
+            return 1;
+        }
+
+        if (bestDistanceToTarget >= horizontalFlightRange)
+        {
+            // Все добре, дрон є на достатній відстані від цілі щоб попасти снарядом
+            // Точка скиду залишається без змін
+        }
+        else
+        {
+            // Дрон перетнув межу horizontalFlightRange, треба знову врахувати час на маневр
+            // Треба знайти нову точку скиду, треба знайти точку на відстані horizontalFlightRange від цілі
+            // Тобто у мене є координати цілі та дрона і відстань horizontalFlightRange
+            // 
+            // 1) Знайти вектор від дрона до цілі
+            // 2) Знаходимо одиничний вектор
+            // 3) Рухаємося на певну відстань по цьому 1-ому вектору
+            // 
+            // Наприклад,
+            //      - дрон (x1 = 1, y1 = 2) 
+            //      - ціль (x2 = 5, y2 = 4) 
+            //      - треба відступити від цілі на 3 метри
+            // 
+            // 1) Знадемо векток від дрона до цілі:
+            // Вектор рахуємо (куди - звідки):
+            //      drone -> target => (targetX - droneX; targetY - droneY)
+            //      target -> drone => (droneX - targetX; droneY - targetY)
+            // 
+            //      (x2 - x1; y2 - y1)
+            //      (5-1; 4-2) = (4; 2)
+            // 
+            // 2) Знадемо одиничний вектор:
+            //      а) Знайти довжину ветора: √((x2 - x1)² + (y2 - y1)²)
+            //          √(4² + 2²) = √(16 + 4) = √(20) ~ 4.47
+            //      б) Поділити координати на довжину:
+            //          (4 / 4.47; 2 / 4.47) = (0.89; 0.44) = (nx; ny)
+            // 3) Рухаємося на 3 метри від цілі:
+            //          (x2 - nx * 3; y2 - ny * 3)
+            //          (5 - 0.89 * 3; 4 - 0.44 * 3)
+            //          (5 - 2.67; 4 - 1.32)
+            //          (2.33; 2.68)
+            // Отже, (2.33; 2.68) - це координати точки на відстані в 3 метри від цілі в напрямку дрона
+
+            // 1)
+            float vecX = bestTargetX - state.droneX;
+            float vecY = bestTargetY - state.droneY;
+
+            // 2)
+            float vecDistance = std::sqrt((vecX * vecX) + (vecY * vecY));
+            float nx = vecX / vecDistance;
+            float ny = vecY / vecDistance;
+
+            // 3)
+            float newDropPointX = bestTargetX - nx * horizontalFlightRange;
+            float newDropPointY = bestTargetY - ny * horizontalFlightRange;
+
+            bestDropPointX = newDropPointX;
+            bestDropPointY = newDropPointY;
+        }
+
+        // Тепр коли ми маємо нову ціль + її координати + нову точку скиду
+        // треба зрозуміти чи має дрон розвернутися до точки скиду
+        // 1) Для цього знайдемо спочатку напрямок куди дрон має дивитися для нової цілі
+        float vecX = bestDropPointX - state.droneX;
+        float vecY = bestDropPointY - state.droneY;
+        // 2) Далі треба знайти кут між Х і точкою скиду
+        float angleToDropPoint = std::atan2(vecY, vecX);
+        // angleToDropPoint - це значення в радіанах, і воно обмежене [-M_PI; M_PI] або [-180 градусів; 180 градуів]
+        // 3) І тепер ми можемо знайти різницю між тим куди зараз дивитися дрон і тим куди треба
+        float deltaAngle = normalizeAngle(angleToDropPoint - state.droneDir);
+        // І тепер якщо deltaAngle = 0, це означає що дрон дивитися прямо на точку скиду
+        // Якщо < 0, тоді треба розвертатися ліворуч, якщо > 0, тоді праворуч
+        LOG_INFO("deltaAngle -> " << deltaAngle);
 
         state.totalSimTime = count * inputData.simTimeStep;
         count++;
