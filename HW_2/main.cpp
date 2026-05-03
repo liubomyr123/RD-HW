@@ -772,13 +772,7 @@ bool getAmmoDropPoint(AmmoDropPointData& result,
     return true;
 }
 
-struct InterpolationResult
-{
-    float resultX; 
-    float resultY;
-};
-
-bool interpolate(InterpolationResult& result, 
+bool interpolate(Vec2& result, 
     const int& targetIndex,
     const float& timeFrame,
     const InputData& inputData, 
@@ -811,12 +805,12 @@ bool interpolate(InterpolationResult& result,
     float x0 = targetsData.targetXInTime[targetIndex][idx];
     float x1 = targetsData.targetXInTime[targetIndex][next];
     float x = x0 + (x1 - x0) * frac;
-    result.resultX = x;
+    result.x = x;
 
     float y0 = targetsData.targetYInTime[targetIndex][idx];
     float y1 = targetsData.targetYInTime[targetIndex][next];
     float y = y0 + (y1 - y0) * frac;
-    result.resultY = y;
+    result.y = y;
 
     // LOG_SUCCESS("Successfully interpolated distance for target " << targetIndex);
 
@@ -862,23 +856,23 @@ bool getTargetVelocity(Vec2& result,
     float timeFrame0 = t;
     float timeFrame1 = t + dt;
 
-    InterpolationResult currentPos{};
+    Vec2 currentPos{};
     if (!interpolate(currentPos, targetIndex, timeFrame0, inputData, targetsData))
     {
         return false;
     }
-    InterpolationResult nextPos{};
+    Vec2 nextPos{};
     if (!interpolate(nextPos, targetIndex, timeFrame1, inputData, targetsData))
     {
         return false;
     }
 
-    float x0 = currentPos.resultX;
-    float x1 = nextPos.resultX;
+    float x0 = currentPos.x;
+    float x1 = nextPos.x;
     float dx = x1 - x0;
 
-    float y0 = currentPos.resultY;
-    float y1 = nextPos.resultY;
+    float y0 = currentPos.y;
+    float y1 = nextPos.y;
     float dy = y1 - y0;
 
     float targetVx = dx / dt;
@@ -1130,15 +1124,13 @@ int main()
         LOG_INFO("Total simulation time elapsed: " << state.totalSimTime << "[s]");
 
         // Знайшли координати цілей на даний момент
-        InterpolationResult interpolateResults[targets_number]{};
+        Vec2 interpolatedPosition[targets_number]{};
         for (size_t i = 0; i < targets_number; i++)
         {
-            InterpolationResult result{};
-            if (!interpolate(result, i, state.totalSimTime, inputData, targetsData))
+            if (!interpolate(interpolatedPosition[i], i, state.totalSimTime, inputData, targetsData))
             {
                 return 1;
             }
-            interpolateResults[i] = result;
         }
 
         // Шукаємо найкращу ціль на даний момент
@@ -1164,8 +1156,8 @@ int main()
             float predictedDropPointY = 0.0f;
 
             // Нехай перше припущення цілі - там де ціль зараз стоїть
-            predictedTargetX = interpolateResults[target_iterator].resultX;
-            predictedTargetY = interpolateResults[target_iterator].resultY;
+            predictedTargetX = interpolatedPosition[target_iterator].x;
+            predictedTargetY = interpolatedPosition[target_iterator].y;
 
             for (size_t j = 0; j < 6; j++)
             {
@@ -1438,6 +1430,54 @@ int main()
 
             bestDropPointX = newDropPointX;
             bestDropPointY = newDropPointY;
+        }
+
+        // Тепер треба знайти чи треба нам скидутаи снаряд прямо зараз, щоб виконати місію
+        // Для цього дрон має рухатися, тобто мати швидкість attackSpeed - швидкість при якій він скидає
+        // І через те що і ціль рухається також нам треба знати де буде ціль якщо ми
+        // прямо зараз в поточкому фреймі скинемо снаряд і воно пролетить ammoTimeOfFlight секунд часу
+        // І порівняти 2 точки - де впаде снаряд і де буде ціль
+        // В ідеалі якщо це однакові точки - ми фактично фіксуємо попадання
+        // Але за умовою ми маємо hitRadius - це допустима похибка попадання в метрах
+        // Отже, у нас буде певний запас на попадання цілі
+        // Тому будемо шукати точку де буде ціль 
+        // Шукаємо відстань від точки де впаде снаряд до точки де буде ціль і ця відстань
+        // має бути меншою-рівною hitRadius
+        // 1) Знаходимо одиничний вектор напрямку дрона:
+        float vecX = std::cos(state.droneDir);
+        float vecY = std::sin(state.droneDir);
+        // 2) Рахуємо зміщення по координатах на horizontalFlightRange по знайдемону вектору
+        float shiftX = vecX * horizontalFlightRange;
+        float shiftY = vecY * horizontalFlightRange;
+        // 3) Знаходимо точку де буде снаряд 
+        float hitX = state.droneX + shiftX;
+        float hitY = state.droneY + shiftY;
+        // 4) Шукаємо точку де буде ціль ціль через ammoTimeOfFlight
+        Vec2 targetVelocity{};
+        if (!getTargetVelocity(targetVelocity, state.currentTargetIndex, state, inputData, targetsData))
+        {
+            return 1;
+        }
+        Vec2 predictedPosition{};
+        if (!getPredictedPosition(predictedPosition, 
+            targetVelocity.x, targetVelocity.y, 
+            bestTargetX, bestTargetY,
+            ammoTimeOfFlight)) 
+        {
+            return 1;
+        }
+        // 5) Шукаємо відстань між цими точками
+        float hitDistance = 0.0f;
+        if (!getDistanceToTarget(hitDistance, 
+            hitX, hitY, 
+            predictedPosition.x, predictedPosition.y)) 
+        {
+            return 1;
+        }
+        if (state.droneState == MOVING && hitDistance <= inputData.hitRadius)
+        {
+            // Ура, реєструємо ураження цілі, зупиняємо симуляцію
+            break;
         }
 
         // Тепр коли ми маємо нову ціль + її координати + нову точку скиду
